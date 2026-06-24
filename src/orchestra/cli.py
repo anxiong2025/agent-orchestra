@@ -1,7 +1,7 @@
 """命令行入口 —— `uv run orchestra`。
 
 - `orchestra`        看当前进度看板、下一步做哪个迭代。
-- `orchestra chat`   M1:和真实 Claude 单轮对话(走 Bedrock,用你本地 AWS 凭证)。
+- `orchestra chat`   M2:和真实 Claude 多轮对话(它记得上文;走 Bedrock,用你本地 AWS 凭证)。
 
 随着 M1–M11 完成,这里会从"看板 + chat"长成真正驱动 run_loop 的入口。
 """
@@ -15,7 +15,7 @@ import sys
 MILESTONES: list[tuple[str, str, bool]] = [
     ("M0", "项目骨架(uv / lint / test / 占位模块)", True),
     ("M1", "直接调真实 LLM:单轮对话(providers/bedrock.py / cli.py chat)", True),
-    ("M2", "多轮对话循环:上下文记忆(loop.py)", False),
+    ("M2", "多轮对话循环:上下文记忆(loop.py)", True),
     ("M3", "第一个工具:想→做→看 + maxTurns(tool.py / context.py / loop.py)", False),
     ("M4", "多工具并发:读并发/写独占(orchestration.py)", False),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", False),
@@ -29,23 +29,18 @@ MILESTONES: list[tuple[str, str, bool]] = [
 
 
 async def _chat() -> None:
-    """M1:读一句输入 → 调真实模型 → 打印回复。单轮(多轮记忆是 M2)。"""
-    from orchestra.message import Message
+    """chat 入口:造 model + 提示语,把对话循环交给 loop.py 的 run_chat_loop。
+
+    入口已接好 —— 你只需去 loop.py 把 run_chat_loop 的函数体填完(M2)。
+    填完后 `uv run orchestra chat` 就是多轮对话;在那之前会提示 M2 未实现。
+    """
+    from orchestra.loop import run_chat_loop
     from orchestra.providers import make_model
 
     model = make_model("bedrock")
-    print("Agent Orchestra · chat(M1 单轮对话,真实 Claude via Bedrock)")
-    print("输入一句话,回车发送;Ctrl-C 退出。\n")
-    try:
-        while True:
-            # input() 是阻塞的,丢到线程里跑,别卡住事件循环。
-            user_input = (await asyncio.to_thread(input, "你 > ")).strip()
-            if not user_input:
-                continue
-            reply = await model.complete([Message.user(user_input)])
-            print(f"\nClaude > {reply.content}\n")
-    except (KeyboardInterrupt, EOFError):
-        print("\n再见。")
+    print("Agent Orchestra · chat(M2 多轮对话,真实 Claude via Bedrock)")
+    print("输入一句话,回车发送;它记得上文;Ctrl-C 退出。\n")
+    await run_chat_loop(model)
 
 
 def main() -> None:
@@ -61,7 +56,7 @@ def main() -> None:
         if not done and next_todo is None:
             next_todo = f"{tag} —— {title}"
     print()
-    print("💬 现在就能体验: uv run orchestra chat  —— 和真实 Claude 单轮对话(M1)")
+    print("💬 现在就能体验: uv run orchestra chat  —— 和真实 Claude 多轮对话(M2,它记得上文)")
     print()
     if next_todo:
         print(f"👉 下一步: {next_todo}")
