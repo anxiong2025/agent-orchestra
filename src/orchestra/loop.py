@@ -1,4 +1,4 @@
-"""M3 · 主循环 —— Agent 的"心脏":想 → 做 → 看(+ maxTurns 熔断)。
+"""M3 · 主循环 —— Agent 的"心脏":ReAct 循环(Reason → Act → Observe)+ maxTurns 熔断。
 
 对标 Claude Code: src/query.ts 的 queryLoop(while True);maxTurns 见 §2.6
 讲清的原理: 这就是 Prompt Chaining / ReAct 的本质 —— 工具结果回灌成下一轮输入,
@@ -31,7 +31,7 @@ async def run_agent_turn(
     max_turns: int = DEFAULT_MAX_TURNS,
     on_event: Callable[[str, Message], None] | None = None,
 ) -> list[Message]:
-    """处理一次用户提问的完整"想→做→看"循环,原地追加到 messages 并返回。
+    """处理一次用户提问的完整"ReAct 循环(推理→行动→观察)"循环,原地追加到 messages 并返回。
 
     on_event(kind, msg): 可选回调,kind ∈ {"assistant","tool_result"},用于实时打印。
     """
@@ -82,7 +82,7 @@ async def run_chat_loop(
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
 ) -> None:
-    """多轮对话外壳:维护累积历史,每轮跑一次 run_agent_turn(想→做→看)。"""
+    """多轮对话外壳:维护累积历史,每轮跑一次 run_agent_turn(ReAct 循环(推理→行动→观察))。"""
     registry = registry or ToolRegistry()
     ctx = RunContext()
     messages: list[Message] = []

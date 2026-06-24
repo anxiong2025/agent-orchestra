@@ -40,7 +40,7 @@ src/orchestra/
   tool.py           M2  工具系统(is_concurrency_safe 自声明)
   context.py        M2  运行上下文(abort + 递归深度)
   orchestration.py  M3  ⭐ 读并发 / 写独占 + 流式
-  loop.py           M4  主循环(想→做→看 + maxTurns)
+  loop.py           M4  主循环(ReAct:推理→行动→观察 + maxTurns)
   subagent.py       M5  子 Agent(递归 + 上下文隔离)
   coordinator.py    M6  协调器(Orchestrator-Workers)
   mailbox.py        M7  Agent 间通信
