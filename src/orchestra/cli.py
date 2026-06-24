@@ -1,29 +1,58 @@
 """命令行入口 —— `uv run orchestra`。
 
-这是骨架自带的、唯一现在就能跑的东西:它会告诉你当前进度、下一步做哪个迭代。
-随着 M1–M11 完成,你可以把这里改成真正驱动 run_loop 的入口。
+- `orchestra`        看当前进度看板、下一步做哪个迭代。
+- `orchestra chat`   M1:和真实 Claude 单轮对话(走 Bedrock,用你本地 AWS 凭证)。
+
+随着 M1–M11 完成,这里会从"看板 + chat"长成真正驱动 run_loop 的入口。
 """
 
 from __future__ import annotations
 
+import asyncio
+import sys
+
 # 迭代清单(与 ROADMAP.md 对应)。done 字段你做完一个就改成 True。
 MILESTONES: list[tuple[str, str, bool]] = [
     ("M0", "项目骨架(uv / lint / test / 占位模块)", True),
-    ("M1", "消息 + 模型抽象(message.py / model.py)", False),
-    ("M2", "工具系统(tool.py / context.py)", False),
-    ("M3", "工具编排:读并发/写独占 + 流式(orchestration.py)", False),
-    ("M4", "主循环:想→做→看 + maxTurns(loop.py)", False),
+    ("M1", "直接调真实 LLM:单轮对话(providers/bedrock.py / cli.py chat)", True),
+    ("M2", "多轮对话循环:上下文记忆(loop.py)", False),
+    ("M3", "第一个工具:想→做→看 + maxTurns(tool.py / context.py / loop.py)", False),
+    ("M4", "多工具并发:读并发/写独占(orchestration.py)", False),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", False),
     ("M6", "协调器:Orchestrator-Workers(coordinator.py)", False),
     ("M7", "Agent 间通信:mailbox + SendMessage(mailbox.py)", False),
     ("M8", "评估-优化循环(examples/)", False),
-    ("M9", "接入真实 LLM(AnthropicModel)", False),
+    ("M9", "多 provider 切换(providers/)", False),
     ("M10", "调研工具 + 溯源/防幻觉", False),
     ("M11", "业务编排:老外挖中国供应商", False),
 ]
 
 
+async def _chat() -> None:
+    """M1:读一句输入 → 调真实模型 → 打印回复。单轮(多轮记忆是 M2)。"""
+    from orchestra.message import Message
+    from orchestra.providers import make_model
+
+    model = make_model("bedrock")
+    print("Agent Orchestra · chat(M1 单轮对话,真实 Claude via Bedrock)")
+    print("输入一句话,回车发送;Ctrl-C 退出。\n")
+    try:
+        while True:
+            # input() 是阻塞的,丢到线程里跑,别卡住事件循环。
+            user_input = (await asyncio.to_thread(input, "你 > ")).strip()
+            if not user_input:
+                continue
+            reply = await model.complete([Message.user(user_input)])
+            print(f"\nClaude > {reply.content}\n")
+    except (KeyboardInterrupt, EOFError):
+        print("\n再见。")
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "chat":
+        asyncio.run(_chat())
+        return
+
     print("Agent Orchestra —— 多 Agent 编排引擎(学习导向,对标 Claude Code)\n")
     next_todo: str | None = None
     for tag, title, done in MILESTONES:
@@ -32,9 +61,11 @@ def main() -> None:
         if not done and next_todo is None:
             next_todo = f"{tag} —— {title}"
     print()
+    print("💬 现在就能体验: uv run orchestra chat  —— 和真实 Claude 单轮对话(M1)")
+    print()
     if next_todo:
         print(f"👉 下一步: {next_todo}")
         print("   打开对应模块,删掉顶部的 raise NotImplementedError,按 TODO 实现。")
-        print("   详细拆解见 ROADMAP.md。")
+        print("   详细拆解见 specs/07-迭代开发计划.md。")
     else:
         print("🎉 全部迭代完成 —— 你已复刻 Claude Code 的多 Agent 编排核心。")
