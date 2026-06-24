@@ -7,24 +7,36 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from orchestra.message import Message
 
 
 class Model(ABC):
     @abstractmethod
-    async def complete(self, messages: list[Message]) -> Message:
-        """接收对话历史,返回一条 assistant 消息。接口 provider 无关。"""
+    async def complete(
+        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+    ) -> Message:
+        """接收对话历史(可选工具列表),返回一条 assistant 消息。接口 provider 无关。
+
+        tools: 每个工具的 schema(name/description/input_schema)。provider 负责
+               翻译成各家 API 的格式,并把模型的"要调工具"翻译回我们的 ToolCall。
+        """
 
 
 class MockModel(Model):
-    """按预设脚本顺序吐回应,无需 API key,驱动前 8 个迭代的测试与演示。"""
+    """按预设脚本顺序吐回应,无需 API key,驱动前 8 个迭代的测试与演示。
+
+    脚本里的 Message 可以带 tool_calls —— 用来模拟"模型决定调工具"。
+    """
 
     def __init__(self, script: list[Message]) -> None:
         self._script = list(script)
         self._index = 0
 
-    async def complete(self, messages: list[Message]) -> Message:
+    async def complete(
+        self, messages: list[Message], tools: list[dict[str, Any]] | None = None
+    ) -> Message:
         if self._index >= len(self._script):
             # 脚本耗尽后返回空文本,让 loop 自然结束
             return Message.assistant(content="(done)")

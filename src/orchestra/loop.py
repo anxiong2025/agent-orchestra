@@ -1,45 +1,100 @@
-"""M2 · 多轮对话循环 —— 让 Agent 记得上文。
+"""M3 · 主循环 —— Agent 的"心脏":想 → 做 → 看(+ maxTurns 熔断)。
 
-对标 Claude Code: src/query.ts 的会话循环 —— 每轮把回复 append 回 messages,
-                  下一轮把【整个历史】再发给模型。这就是"记忆"的本质。
-讲清的原理: 上下文 = 一个不断增长的 Message 列表。没有数据库、没有魔法,
-            "它记得"只是因为每轮都把全部历史一起发出去。
+对标 Claude Code: src/query.ts 的 queryLoop(while True);maxTurns 见 §2.6
+讲清的原理: 这就是 Prompt Chaining / ReAct 的本质 —— 工具结果回灌成下一轮输入,
+            链是循环的副产品。"结束"由模型自决(它不再要工具 = 它觉得做完了)。
+            能自主决策就可能陷死循环,所以 maxTurns 是必须的安全带。
 
-(M4 会在这个循环里加"想→做→看 + 工具",把它升级成真正的 Agent 循环。M2 先做无工具版。)
-
-────────────────────────────────────────────────────────────────────────
-TODO(M2): async def run_chat_loop(model) -> None
-    messages = []                          # ① 记忆:一个贯穿全程的列表
-    while True:
-        user_input = 读一句输入             # ② input() 阻塞,用 asyncio.to_thread 包
-        if 用户退出(EOF/Ctrl-C): break
-        messages.append(user 消息)          # ③ 用户这句进历史
-        reply = await model.complete(messages)  # ④ 把【整个历史】发出去(不是单句!)
-        messages.append(reply)             # ⑤ 回复也进历史 → 下轮模型就"记得"
-        打印 reply                          # ⑥ 回到 ②
-
-验证: uv run orchestra chat
-      你 > 我叫小明
-      你 > 我叫什么?      ← 它应当答"你叫小明"(记住了 ⑤)
-对标讲解见 specs/07-迭代开发计划.md 的 M2 一节(含架构图)。
-────────────────────────────────────────────────────────────────────────
+M2 是无工具的纯对话;M3 在循环里加了"模型要不要调工具"的分支。
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 
+from orchestra.context import RunContext
 from orchestra.message import Message
 from orchestra.model import Model
+from orchestra.tool import ToolRegistry
+
+# 默认最大轮数:防止 Agent 反复调工具停不下来烧钱。
+DEFAULT_MAX_TURNS = 10
 
 
-async def run_chat_loop(model: Model) -> None:
-    """M2 多轮对话:维护一个累积的 messages,每轮把整个历史发给模型。"""
-    messages: list[Message] = []  # ① 记忆:贯穿全程、只增不减的列表
+async def run_agent_turn(
+    messages: list[Message],
+    model: Model,
+    registry: ToolRegistry,
+    ctx: RunContext,
+    *,
+    max_turns: int = DEFAULT_MAX_TURNS,
+    on_event: Callable[[str, Message], None] | None = None,
+) -> list[Message]:
+    """处理一次用户提问的完整"想→做→看"循环,原地追加到 messages 并返回。
+
+    on_event(kind, msg): 可选回调,kind ∈ {"assistant","tool_result"},用于实时打印。
+    """
+    tool_schemas = [
+        {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+        for t in registry.all()
+    ]
+
+    for _turn in range(max_turns):
+        # 想:把整个历史(+工具清单)发给模型。
+        reply = await model.complete(messages, tools=tool_schemas or None)
+        messages.append(reply)
+        if on_event:
+            on_event("assistant", reply)
+
+        # 看:模型没要求调工具 → 它觉得做完了,结束。
+        if not reply.tool_calls:
+            return messages
+
+        # 做:逐个执行工具,结果回灌成消息(M4 再把只读的并发化)。
+        for call in reply.tool_calls:
+            tool = registry.get(call.name)
+            if tool is None:
+                result = f"错误:未知工具 {call.name}"
+            else:
+                result = await tool.run(call.input, ctx)
+            tool_msg = Message.tool_result(call.id, result)
+            messages.append(tool_msg)
+            if on_event:
+                on_event("tool_result", tool_msg)
+        # 回到循环顶:模型基于工具结果再决策。
+
+    # 熔断:转太多圈还没收尾,强制结束并留个痕迹。
+    limit_msg = Message.assistant(content=f"(已达最大轮数 {max_turns},强制结束)")
+    messages.append(limit_msg)
+    if on_event:
+        on_event("assistant", limit_msg)
+    return messages
+
+
+# REPL 的 I/O 做成可注入,方便测试塞脚本。
+ReadInput = Callable[[], Awaitable[str | None]]
+
+
+async def run_chat_loop(
+    model: Model,
+    registry: ToolRegistry | None = None,
+    *,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> None:
+    """多轮对话外壳:维护累积历史,每轮跑一次 run_agent_turn(想→做→看)。"""
+    registry = registry or ToolRegistry()
+    ctx = RunContext()
+    messages: list[Message] = []
+
+    def on_event(kind: str, msg: Message) -> None:
+        if kind == "assistant" and msg.tool_calls:
+            names = ", ".join(c.name for c in msg.tool_calls)
+            print(f"\n[Agent 调用工具: {names}]")
+        elif kind == "assistant" and msg.content:
+            print(f"\nClaude > {msg.content}\n")
 
     while True:
-        # ② 读一句输入。input() 阻塞,丢到线程里跑,别卡住事件循环。
-        #    Ctrl-C / Ctrl-D 退出 → 跳出循环。
         try:
             user_input = (await asyncio.to_thread(input, "你 > ")).strip()
         except (KeyboardInterrupt, EOFError):
@@ -47,9 +102,9 @@ async def run_chat_loop(model: Model) -> None:
         if not user_input:
             continue
 
-        messages.append(Message.user(user_input))  # ③ 用户这句进历史
-        reply = await model.complete(messages)  # ④ 把【整个历史】发出去(不是单句!)
-        messages.append(reply)  # ⑤ 回复也进历史 → 下轮模型就"记得"
-        print(f"\nClaude > {reply.content}\n")  # ⑥ 打印,回到 ②
+        messages.append(Message.user(user_input))
+        await run_agent_turn(
+            messages, model, registry, ctx, max_turns=max_turns, on_event=on_event
+        )
 
     print("\n再见。")

@@ -1,7 +1,7 @@
 """命令行入口 —— `uv run orchestra`。
 
 - `orchestra`        看当前进度看板、下一步做哪个迭代。
-- `orchestra chat`   M2:和真实 Claude 多轮对话(它记得上文;走 Bedrock,用你本地 AWS 凭证)。
+- `orchestra chat`   M3:想→做→看 Agent(能调工具读文件/查时间;走 Bedrock,用你本地 AWS 凭证)。
 
 随着 M1–M11 完成,这里会从"看板 + chat"长成真正驱动 run_loop 的入口。
 """
@@ -16,7 +16,7 @@ MILESTONES: list[tuple[str, str, bool]] = [
     ("M0", "项目骨架(uv / lint / test / 占位模块)", True),
     ("M1", "直接调真实 LLM:单轮对话(providers/bedrock.py / cli.py chat)", True),
     ("M2", "多轮对话循环:上下文记忆(loop.py)", True),
-    ("M3", "第一个工具:想→做→看 + maxTurns(tool.py / context.py / loop.py)", False),
+    ("M3", "第一个工具:想→做→看 + maxTurns(tool.py / context.py / loop.py)", True),
     ("M4", "多工具并发:读并发/写独占(orchestration.py)", False),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", False),
     ("M6", "协调器:Orchestrator-Workers(coordinator.py)", False),
@@ -29,18 +29,17 @@ MILESTONES: list[tuple[str, str, bool]] = [
 
 
 async def _chat() -> None:
-    """chat 入口:造 model + 提示语,把对话循环交给 loop.py 的 run_chat_loop。
-
-    入口已接好 —— 你只需去 loop.py 把 run_chat_loop 的函数体填完(M2)。
-    填完后 `uv run orchestra chat` 就是多轮对话;在那之前会提示 M2 未实现。
-    """
+    """chat 入口:造 model + 工具 + 提示语,把对话循环交给 loop.py。"""
     from orchestra.loop import run_chat_loop
     from orchestra.providers import make_model
+    from orchestra.tool import ClockTool, ReadFileTool, ToolRegistry
 
     model = make_model("bedrock")
-    print("Agent Orchestra · chat(M2 多轮对话,真实 Claude via Bedrock)")
-    print("输入一句话,回车发送;它记得上文;Ctrl-C 退出。\n")
-    await run_chat_loop(model)
+    registry = ToolRegistry([ReadFileTool(), ClockTool()])  # M3:给它一双手
+    print("Agent Orchestra · chat(M3 想→做→看,真实 Claude via Bedrock)")
+    print("它能读文件/查时间;记得上文;Ctrl-C 退出。")
+    print("试试:读一下 README.md 第一行 / 现在几点\n")
+    await run_chat_loop(model, registry)
 
 
 def main() -> None:
@@ -56,7 +55,7 @@ def main() -> None:
         if not done and next_todo is None:
             next_todo = f"{tag} —— {title}"
     print()
-    print("💬 现在就能体验: uv run orchestra chat  —— 和真实 Claude 多轮对话(M2,它记得上文)")
+    print("💬 现在就能体验: uv run orchestra chat  —— 想→做→看 Agent(M3,能调工具干活)")
     print()
     if next_todo:
         print(f"👉 下一步: {next_todo}")

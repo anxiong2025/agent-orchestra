@@ -1,17 +1,88 @@
-"""M2 · 工具系统 —— Agent 的"手"。
+"""M3 · 工具系统 —— Agent 的"手"。
 
 对标 Claude Code: src/Tool.ts(工具抽象、isConcurrencySafe)
 讲清的原理: 工具自己声明能不能并发,而不是让调度器去猜(声明式并发的根)。
-
-────────────────────────────────────────────────────────────────────────
-TODO(M2):
-  - Tool(抽象基类): name / description / `async def run(self, input, ctx) -> str`
-  - 关键字段 is_concurrency_safe: 只读=True / 写=False(M3 分批要用)
-  - ToolRegistry: 按名字注册和查找工具
-  - 两个示例工具: ReadFileTool(safe=True)、WriteFileTool(safe=False)
-对标讲解见 docs/agent-orchestration.md 第 2 节。
-────────────────────────────────────────────────────────────────────────
+            is_concurrency_safe 现在只是个声明字段,M4 的读并发/写独占分批会真正用到它。
 """
 
-# TODO(M2): 删除这行,开始定义 Tool / ToolRegistry / 示例工具。
-raise NotImplementedError("M2: 实现工具系统(见本文件顶部 TODO)")
+from __future__ import annotations
+
+import asyncio
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
+
+from orchestra.context import RunContext
+
+
+class Tool(ABC):
+    """一个工具 = 名字 + 描述 + 一段能跑的 run()。模型靠 description 决定要不要用。"""
+
+    name: ClassVar[str]
+    description: ClassVar[str]
+    # 只读=True(能和别人并发跑) / 写=False(得独占)。M4 分批的依据。
+    is_concurrency_safe: ClassVar[bool] = True
+    # 入参 schema(JSON Schema),provider 会翻译给模型看。
+    input_schema: ClassVar[dict[str, Any]] = {"type": "object", "properties": {}}
+
+    @abstractmethod
+    async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
+        """执行工具,返回结果字符串(会被回灌进对话历史)。"""
+
+
+class ToolRegistry:
+    """按名字注册和查找工具。模型说"调 read_file",这里把名字映射到实例。"""
+
+    def __init__(self, tools: list[Tool] | None = None) -> None:
+        self._tools: dict[str, Tool] = {}
+        for t in tools or []:
+            self.register(t)
+
+    def register(self, tool: Tool) -> None:
+        self._tools[tool.name] = tool
+
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
+
+    def all(self) -> list[Tool]:
+        return list(self._tools.values())
+
+
+# ── 示例工具 ──────────────────────────────────────────────────────────────
+
+class ReadFileTool(Tool):
+    """读文件(只读 → safe=True)。"""
+
+    name = "read_file"
+    description = "读取本地文本文件的内容。参数 path 是文件路径。"
+    is_concurrency_safe = True
+    input_schema = {
+        "type": "object",
+        "properties": {"path": {"type": "string", "description": "文件路径"}},
+        "required": ["path"],
+    }
+
+    async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
+        path = tool_input.get("path", "")
+
+        def _read() -> str:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return f.read()
+            except OSError as e:
+                return f"读取失败: {e}"
+
+        # 文件 IO 是阻塞的,丢到线程里,别卡事件循环(为 M4 并发铺路)。
+        return await asyncio.to_thread(_read)
+
+
+class ClockTool(Tool):
+    """报当前时间(只读 → safe=True)。"""
+
+    name = "now"
+    description = "返回服务器当前的日期和时间。无参数。"
+    is_concurrency_safe = True
+
+    async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
+        from datetime import datetime
+
+        return datetime.now().isoformat(timespec="seconds")
