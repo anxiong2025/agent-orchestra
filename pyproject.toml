@@ -1,0 +1,55 @@
+[project]
+name = "orchestra"
+version = "0.1.0"
+description = "一个学习导向的多 Agent 编排引擎,对标 Claude Code 的真实编排设计"
+readme = "README.md"
+requires-python = ">=3.14"
+authors = [{ name = "andrew", email = "2652020872@qq.com" }]
+dependencies = []
+
+[project.scripts]
+orchestra = "orchestra.cli:main"
+
+[dependency-groups]
+# 开发依赖:uv sync 默认会装。运行 `uv run pytest` / `uv run ruff` 即可。
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.10,<0.12.0"]
+build-backend = "uv_build"
+
+# ---------------------------------------------------------------------------
+# Ruff:格式化 + lint,一把梭。规则保持克制(学习项目,别被 lint 淹没)。
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort(import 排序)
+    "UP",  # pyupgrade(用新语法)
+    "B",   # bugbear(常见坑)
+    "ASYNC", # async 专项检查 —— 这个项目重度 async,很有用
+]
+ignore = [
+    "E501",  # 行宽交给 formatter,不报错
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B"]
+
+# ---------------------------------------------------------------------------
+# pytest:全异步项目,默认 asyncio 模式自动处理 async 测试。
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q"
