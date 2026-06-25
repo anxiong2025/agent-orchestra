@@ -16,8 +16,12 @@ MILESTONES: list[tuple[str, str, bool]] = [
     ("M0", "项目骨架(uv / lint / test / 占位模块)", True),
     ("M1", "直接调真实 LLM:单轮对话(providers/bedrock.py / cli.py chat)", True),
     ("M2", "多轮对话循环:上下文记忆(loop.py)", True),
-    ("M3", "第一个工具:ReAct 循环(推理→行动→观察)+ maxTurns(tool.py / context.py / loop.py)", True),
-    ("M4", "多工具并发:读并发/写独占(orchestration.py)", False),
+    (
+        "M3",
+        "第一个工具:ReAct 循环(推理→行动→观察)+ maxTurns(tool.py / context.py / loop.py)",
+        True,
+    ),
+    ("M4", "多工具并发:读并发/写独占(orchestration.py)", True),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", False),
     ("M6", "协调器:Orchestrator-Workers(coordinator.py)", False),
     ("M7", "Agent 间通信:mailbox + SendMessage(mailbox.py)", False),
@@ -32,13 +36,16 @@ async def _chat() -> None:
     """chat 入口:造 model + 工具 + 提示语,把对话循环交给 loop.py。"""
     from orchestra.loop import run_chat_loop
     from orchestra.providers import make_model
-    from orchestra.tool import ClockTool, ReadFileTool, ToolRegistry
+    from orchestra.tool import ClockTool, ReadFileTool, ToolRegistry, WriteFileTool
 
     model = make_model("bedrock")
-    registry = ToolRegistry([ReadFileTool(), ClockTool()])  # M3:给它一双手
-    print("Agent Orchestra · chat(M3 ReAct Agent,真实 Claude via Bedrock)")
-    print("它能读文件/查时间;记得上文;Ctrl-C 退出。")
-    print("试试:读一下 README.md 第一行 / 现在几点\n")
+    # M4:读工具(并发)+ 写工具(独占),验证读并发/写独占的分批。
+    registry = ToolRegistry([ReadFileTool(), ClockTool(), WriteFileTool()])
+    print(
+        "Agent Orchestra · chat(M4 ReAct Agent,读并发/写独占,真实 Claude via Bedrock)"
+    )
+    print("它能读/写文件、查时间;记得上文;Ctrl-C 退出。")
+    print("试试:同时读 README.md 和 pyproject.toml / 把 'hello' 写到 /tmp/a.txt\n")
     await run_chat_loop(model, registry)
 
 

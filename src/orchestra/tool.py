@@ -49,6 +49,7 @@ class ToolRegistry:
 
 # ── 示例工具 ──────────────────────────────────────────────────────────────
 
+
 class ReadFileTool(Tool):
     """读文件(只读 → safe=True)。"""
 
@@ -86,3 +87,34 @@ class ClockTool(Tool):
         from datetime import datetime
 
         return datetime.now().isoformat(timespec="seconds")
+
+
+class WriteFileTool(Tool):
+    """写文件(改磁盘 → safe=False,必须独占一批,不能和别人并发)。"""
+
+    name = "write_file"
+    description = "把文本写入本地文件。参数 path(路径)和 content(内容)。"
+    # ⭐ M4 的关键:声明自己不可并发 → partition 会让它独占一批、串行跑。
+    is_concurrency_safe = False
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "文件路径"},
+            "content": {"type": "string", "description": "要写入的内容"},
+        },
+        "required": ["path", "content"],
+    }
+
+    async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
+        path = tool_input.get("path", "")
+        content = tool_input.get("content", "")
+
+        def _write() -> str:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return f"已写入 {len(content)} 字符到 {path}"
+            except OSError as e:
+                return f"写入失败: {e}"
+
+        return await asyncio.to_thread(_write)

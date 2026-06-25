@@ -45,5 +45,9 @@ class Message:
         return Message(role=Role.user, content=content, tool_call_id=tool_call_id)
 
     @staticmethod
-    def assistant(content: str = "", tool_calls: list[ToolCall] | None = None) -> Message:
-        return Message(role=Role.assistant, content=content, tool_calls=tool_calls or [])
+    def assistant(
+        content: str = "", tool_calls: list[ToolCall] | None = None
+    ) -> Message:
+        return Message(
+            role=Role.assistant, content=content, tool_calls=tool_calls or []
+        )

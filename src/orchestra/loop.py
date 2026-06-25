@@ -1,11 +1,12 @@
-"""M3 · 主循环 —— Agent 的"心脏":ReAct 循环(Reason → Act → Observe)+ maxTurns 熔断。
+"""M3/M4 · 主循环 —— Agent 的"心脏":ReAct 循环(Reason → Act → Observe)+ maxTurns 熔断。
 
 对标 Claude Code: src/query.ts 的 queryLoop(while True);maxTurns 见 §2.6
 讲清的原理: 这就是 Prompt Chaining / ReAct 的本质 —— 工具结果回灌成下一轮输入,
             链是循环的副产品。"结束"由模型自决(它不再要工具 = 它觉得做完了)。
             能自主决策就可能陷死循环,所以 maxTurns 是必须的安全带。
 
-M2 是无工具的纯对话;M3 在循环里加了"模型要不要调工具"的分支。
+M2 是无工具的纯对话;M3 在循环里加了"模型要不要调工具"的分支;
+M4 把"串行跑工具"换成 orchestration.run_tools(读并发 / 写独占,边完成边回灌)。
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from orchestra.context import RunContext
 from orchestra.message import Message
 from orchestra.model import Model
+from orchestra.orchestration import run_tools
 from orchestra.tool import ToolRegistry
 
 # 默认最大轮数:防止 Agent 反复调工具停不下来烧钱。
@@ -51,14 +53,9 @@ async def run_agent_turn(
         if not reply.tool_calls:
             return messages
 
-        # 做:逐个执行工具,结果回灌成消息(M4 再把只读的并发化)。
-        for call in reply.tool_calls:
-            tool = registry.get(call.name)
-            if tool is None:
-                result = f"错误:未知工具 {call.name}"
-            else:
-                result = await tool.run(call.input, ctx)
-            tool_msg = Message.tool_result(call.id, result)
+        # 做:把这一轮的工具调用交给编排器 —— 只读批并发、写批独占,边完成边回灌。
+        # (M3 这里是逐个串行;M4 换成 run_tools 异步生成器。)
+        async for tool_msg in run_tools(reply.tool_calls, registry, ctx):
             messages.append(tool_msg)
             if on_event:
                 on_event("tool_result", tool_msg)
@@ -97,7 +94,7 @@ async def run_chat_loop(
     while True:
         try:
             user_input = (await asyncio.to_thread(input, "你 > ")).strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt, EOFError:
             break
         if not user_input:
             continue

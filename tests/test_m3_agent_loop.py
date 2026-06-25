@@ -62,9 +62,7 @@ async def test_max_turns_circuit_breaker():
     registry = ToolRegistry([EchoTool()])
     messages: list[Message] = [Message.user("开始")]
 
-    result = await run_agent_turn(
-        messages, model, registry, RunContext(), max_turns=3
-    )
+    result = await run_agent_turn(messages, model, registry, RunContext(), max_turns=3)
 
     # 最后一条应是熔断提示,而不是死循环。
     assert "最大轮数" in result[-1].content
