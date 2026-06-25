@@ -55,6 +55,62 @@
 
 "派哪个子 Agent / 给它什么任务"这个选择,就是 **Routing 模式**。无需单独实现——它是 `AgentTool` 调用参数的自然结果。
 
+### 1.5 ⚠️ 防过度拆分:派多少分身不是代码定的,是模型定的
+
+**这是实战中真实踩到的坑,也是 M5 最该吃透的产品问题。**
+
+§1.3 说"并行白捡"是优点,但它有个反面:**既然模型能自决派几个分身,它就可能派太多。** 我们的第一版实现,只问了一句"对比 Python 和 Rust",模型却:
+
+```
+主 Agent → 派 2 个子 Agent(查 Python / 查 Rust)         ← 合理
+   每个子 Agent 又各自派 4 个孙 Agent(语言特性/生态/场景/性能…) ← 过度!
+= 1 + 2 + 8 = 11 个 Agent,烧 token 又慢
+```
+
+**根因不在代码逻辑(树确实正确长出来了),而在"我们给模型的规则没拦它":**
+① 子 Agent 手上有 `spawn_agent` 工具 → 有锤子就找钉子;
+② 工具描述只说"何时该派",没说"何时别派";
+③ 子 Agent 系统提示没说"自己干完,别再派"。
+
+#### 对标 Claude Code:它用"三道防线"治这个问题
+
+我们读了真实源码(`src/tools/AgentTool/` + `src/constants/tools.ts`),把它的设计搬了过来:
+
+| 防线 | Claude Code 怎么做 | 我们怎么落地 | 对标源码 |
+|---|---|---|---|
+| **① 工具白名单(治本)** | 子 Agent 的工具池里**直接删掉 Agent 工具**(非内部用户),根本没有"派分身"的能力 | `AgentTool(allow_nesting=False)`(默认):造子 Agent 工具集时**自动剔除 `spawn_agent`** | `constants/tools.ts` `ALL_AGENT_DISALLOWED_TOOLS` |
+| **② Prompt 纪律** | 子 Agent 系统提示明确写 `Do NOT spawn sub-agents; execute directly` | `SUBAGENT_SYSTEM` 加一句"自己直接完成,不要再派生子 Agent" | `forkSubagent.ts:178` |
+| **③ "何时不该派"指导** | 工具描述列出 `When NOT to use the Agent tool`(读文件/搜索别派 Agent) | `spawn_agent` 的 description 加"简单的事自己用工具做更快" | `prompt.ts:232-240` |
+
+> **最关键的顿悟**:Claude Code 防套娃**不主要靠"深度计数器"**,而是靠**最干脆的一招——子 Agent 工具箱里压根没有"派分身"这把锤子**。没有锤子,自然不会到处找钉子。`max_depth` 只是"万一显式开了嵌套(`allow_nesting=True`)"时的兜底护栏。
+
+#### 配套:按任务收窄子 Agent 的工具(`subagent_tools` 白名单)
+
+**还有一个独立的坑**:子 Agent 被配了**用不上的工具**也会出乱子。我们给子 Agent 配了读/写/时间全套,结果一个"研究优点"的纯总结任务,子 Agent 居然反复调 `write_file` —— 把几千字内容当参数生成,**单轮模型调用飙到 60 秒,还停不下来直奔 `max_turns`**。
+
+修法对标 Claude Code 的 `ASYNC_AGENT_ALLOWED_TOOLS`(异步子 Agent 只有一份收窄的工具白名单):
+
+```python
+# 研究/总结类子任务 → 只给只读工具,【不给 write_file】
+AgentTool(model, base_tools, subagent_tools=["read_file", "now"])
+```
+
+拿掉写工具这把锤子后,子 Agent 就老实"用文本直接回答",**2 轮收工**,不再死循环写文件。
+
+#### 配套:强制结论简短(对标 `under 500 words`)
+
+子 Agent 若输出几千字结论,既慢(输出 token 越多生成越慢)又污染父级上下文。`SUBAGENT_SYSTEM` 里加"结论控制在 300 字以内,只给关键要点"——对标 `forkSubagent.ts` 的 `Keep your report under 500 words`。
+
+#### 一句话总结(产品视角)
+
+> **多 Agent 的可靠性,一半靠代码约束(工具白名单、深度守卫),一半靠 prompt 纪律(系统提示、工具描述)。** "派几个分身"是模型读了任务 + 我们给的规则后自决的结果——想让它"该派才派、派了别啰嗦",**调的是工具集和提示词,不是编排逻辑**。这正是 AI 产品工程区别于传统软件工程的地方。
+
+---
+
+### 1.6 高频原理问答
+
+> 子 Agent 相关的高频问题(上下文隔离怎么做到、派几个分身、防过度拆分、并行从哪来)**已集中到独立文件** [`08-原理问答.md`](./08-原理问答.md) §M5,那里每题都有"机理 + 速记版"。本文 §1.5 是设计深挖,原理问答是口头表达版,两者配合看。
+
 ---
 
 ## 2. 协调器:星型拓扑(M6,Orchestrator-Workers)

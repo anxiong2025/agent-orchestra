@@ -54,11 +54,13 @@ class ReadFileTool(Tool):
     """读文件(只读 → safe=True)。"""
 
     name = "read_file"
-    description = "读取本地文本文件的内容。参数 path 是文件路径。"
+    # 面向模型的描述用英文(中文见注释):读取本地文本文件的内容,参数 path 是文件路径。
+    description = "Read the contents of a local text file. Parameter `path` is the file path."
     is_concurrency_safe = True
     input_schema = {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "文件路径"}},
+        # 文件路径
+        "properties": {"path": {"type": "string", "description": "The file path."}},
         "required": ["path"],
     }
 
@@ -80,7 +82,8 @@ class ClockTool(Tool):
     """报当前时间(只读 → safe=True)。"""
 
     name = "now"
-    description = "返回服务器当前的日期和时间。无参数。"
+    # 返回服务器当前的日期和时间。无参数。
+    description = "Return the server's current date and time. No parameters."
     is_concurrency_safe = True
 
     async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
@@ -93,14 +96,19 @@ class WriteFileTool(Tool):
     """写文件(改磁盘 → safe=False,必须独占一批,不能和别人并发)。"""
 
     name = "write_file"
-    description = "把文本写入本地文件。参数 path(路径)和 content(内容)。"
+    # 把文本写入本地文件。参数 path(路径)和 content(内容)。
+    description = (
+        "Write text to a local file. "
+        "Parameters: `path` (file path) and `content` (text to write)."
+    )
     # ⭐ M4 的关键:声明自己不可并发 → partition 会让它独占一批、串行跑。
     is_concurrency_safe = False
     input_schema = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "文件路径"},
-            "content": {"type": "string", "description": "要写入的内容"},
+            # 文件路径 / 要写入的内容
+            "path": {"type": "string", "description": "The file path."},
+            "content": {"type": "string", "description": "The text to write."},
         },
         "required": ["path", "content"],
     }
