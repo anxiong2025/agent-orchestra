@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Orchestra · 完整技术架构（当前源码版）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4EAD9; --ink:#2B2417; --ink2:#6E6353; --ink3:#9A8F7B;
+    --orch:#6D45C9; --harn:#0C9486; --react:#2563EB; --model:#BE7611;
+    --cross:#C8344E; --ext:#1F8F5F;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 560px at 84% -12%, rgba(190,118,17,.10), transparent 60%),
+      radial-gradient(900px 620px at -8% 110%, rgba(109,69,201,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans);
+    padding:clamp(16px,3vw,40px);
+  }
+  .wrap{max-width:1160px;margin:0 auto}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px}
+  h1{font-size:clamp(22px,3.6vw,34px);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+  h1 .dim{color:var(--ink2);font-weight:500}
+  h2{font-size:clamp(18px,2.6vw,24px);font-weight:700;letter-spacing:-.01em;margin-top:6px}
+  h2 .dim{color:var(--ink2);font-weight:500;font-size:.7em}
+  p.sub{color:var(--ink2);font-size:14px;margin-top:10px;max-width:78ch;line-height:1.65}
+  p.sub code,.tip code,td code{font-family:var(--mono);font-size:12.5px;background:rgba(43,36,23,.06);padding:1px 5px;border-radius:4px}
+  svg{width:100%;height:auto;display:block;margin-top:18px}
+  text{font-family:var(--sans)}
+  .note{font-family:var(--mono);font-size:11.5px;color:var(--ink3);margin-top:14px;line-height:1.7}
+  .divider{height:1px;background:linear-gradient(90deg,transparent,rgba(43,36,23,.18),transparent);margin:46px 0 8px}
+  .tip{background:rgba(109,69,201,.06);border:1px solid rgba(109,69,201,.25);border-radius:10px;padding:14px 18px;margin-top:18px}
+  .tip b{color:var(--orch)}
+  .tip p{font-size:13.5px;color:var(--ink2);line-height:1.7;margin:0}
+  table{border-collapse:collapse;width:100%;margin-top:20px;font-size:13px}
+  th,td{border:1px solid rgba(43,36,23,.14);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:rgba(43,36,23,.05);font-weight:700;color:var(--ink)}
+  td{color:var(--ink2)}
+  .ok{color:var(--ext);font-weight:700}
+  .stub{color:var(--cross);font-weight:700}
+  .future{color:var(--ink3);font-weight:700}
+  .badge{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:16px;font-family:var(--mono);font-size:11.5px;color:var(--ink2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Agent Orchestra · Full Architecture（对照当前源码 / git HEAD = M5）</div>
+  <h1>Agent Orchestra 完整技术架构<span class="dim"> · 当前源码版</span></h1>
+  <p class="sub">本图画的是 <b>这个 Python 项目自身</b>当前已落地的代码,不是被复刻的 Claude Code。一句话脊柱(<code>specs/05</code>):<b>一个「可递归 / 可隔离 / 可流式」的主循环,加一套「读并发 / 写独占」的分批规则。多 Agent 不是另造的系统,而是「递归地再跑这个循环」。</b><b>没有中央 Orchestrator。</b> 状态如实区分:<span class="ok">■ 已实现(M0–M5,测试 17 项全绿)</span> · <span class="stub">■ 占位桩(raise NotImplementedError)</span> · <span class="future">■ 未来迭代(仓库里尚不存在)</span>。</p>
+
+  <!-- ===================== 图 ①:五层架构(脊柱) ===================== -->
+  <svg viewBox="0 0 1180 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="五层架构">
+    <defs>
+      <marker id="down" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#6D45C9"/></marker>
+      <style>
+        .Lcard{fill:#FFFEFB;stroke-width:1.6}
+        .Ltag{font-family:var(--mono);font-weight:700;font-size:12px}
+        .Lttl{font-weight:700;font-size:15px;fill:#2B2417}
+        .Lsub{font-family:var(--mono);font-size:9.5px;fill:#9A8F7B}
+        .box{stroke-width:1.4}
+        .bxt{font-weight:700;font-size:12px;fill:#2B2417}
+        .bxf{font-family:var(--mono);font-size:9px;fill:#6E6353}
+        .bxm{font-family:var(--mono);font-size:8.5px;fill:#9A8F7B}
+        .dep{font-family:var(--mono);font-size:10px;fill:#9A8F7B}
+      </style>
+    </defs>
+
+    <text x="40" y="28" class="Lttl" style="font-size:14px">① 五层架构 · 依赖只能向下(<tspan class="Lsub">specs/05 §2</tspan>)</text>
+
+    <!-- 业务层 -->
+    <rect x="40" y="44" width="1100" height="62" rx="11" class="Lcard" stroke="#9A8F7B" stroke-dasharray="6 4"/>
+    <rect x="56" y="58" width="118" height="34" rx="7" fill="#9A8F7B" fill-opacity=".10" stroke="#9A8F7B"/>
+    <text x="115" y="80" class="Ltag" fill="#6E6353" text-anchor="middle">业务层</text>
+    <text x="196" y="70" class="Lttl">皮肤 · 可替换</text>
+    <text x="196" y="90" class="Lsub">M11 老外挖中国供应商 + 画像 · 未来:竞品分析 / 市场调研</text>
+    <rect x="980" y="58" width="146" height="34" rx="7" fill="#FFF" stroke="#9A8F7B" stroke-dasharray="4 3"/>
+    <text x="1053" y="79" class="bxf future" text-anchor="middle">未来迭代 · 尚不存在</text>
+
+    <!-- 协作层 -->
+    <rect x="40" y="116" width="1100" height="98" rx="11" class="Lcard" stroke="#6D45C9"/>
+    <rect x="56" y="130" width="118" height="34" rx="7" fill="#6D45C9" fill-opacity=".12" stroke="#6D45C9"/>
+    <text x="115" y="152" class="Ltag" fill="#6D45C9" text-anchor="middle">协作层</text>
+    <text x="196" y="142" class="Lttl">多 Agent · 在内核之上递归 + 通信(不改内核)</text>
+    <!-- subagent done -->
+    <rect x="196" y="158" width="290" height="44" rx="8" class="box" fill="#F4EFFB" stroke="#1F8F5F"/>
+    <text x="208" y="177" class="bxt">subagent.py · AgentTool ✅</text>
+    <text x="208" y="192" class="bxm">M5 递归(再调主循环)+ 上下文隔离 + 防套娃三道防线</text>
+    <!-- coordinator stub -->
+    <rect x="500" y="158" width="305" height="44" rx="8" class="box" fill="#FBEEE9" stroke="#C8344E" stroke-dasharray="5 4"/>
+    <text x="512" y="177" class="bxt">coordinator.py · M6 ⛔</text>
+    <text x="512" y="192" class="bxm">Orchestrator-Workers 星型 · raise NotImplementedError</text>
+    <!-- mailbox stub -->
+    <rect x="819" y="158" width="307" height="44" rx="8" class="box" fill="#FBEEE9" stroke="#C8344E" stroke-dasharray="5 4"/>
+    <text x="831" y="177" class="bxt">mailbox.py · M7 ⛔</text>
+    <text x="831" y="192" class="bxm">Team 网状双向通信 · raise NotImplementedError</text>
+
+    <!-- 内核层 -->
+    <rect x="40" y="224" width="1100" height="98" rx="11" class="Lcard" stroke="#0C9486"/>
+    <rect x="56" y="238" width="118" height="34" rx="7" fill="#0C9486" fill-opacity=".12" stroke="#0C9486"/>
+    <text x="115" y="260" class="Ltag" fill="#0C9486" text-anchor="middle">内核层</text>
+    <text x="196" y="250" class="Lttl">单 Agent 的心脏 · 真正去执行</text>
+    <rect x="196" y="266" width="450" height="44" rx="8" class="box" fill="#EFFAF8" stroke="#1F8F5F"/>
+    <text x="208" y="285" class="bxt">loop.py · run_agent_turn() ✅</text>
+    <text x="208" y="300" class="bxm">M3/M4 ReAct while 循环(推理→行动→观察)· maxTurns=10 熔断</text>
+    <rect x="660" y="266" width="466" height="44" rx="8" class="box" fill="#EFFAF8" stroke="#1F8F5F"/>
+    <text x="672" y="285" class="bxt">orchestration.py · run_tools() ✅</text>
+    <text x="672" y="300" class="bxm">M4 partition_tool_calls:读并发(≤10 Semaphore)/ 写独占 · 异步生成器流式</text>
+
+    <!-- 原语层 -->
+    <rect x="40" y="332" width="1100" height="98" rx="11" class="Lcard" stroke="#BE7611"/>
+    <rect x="56" y="346" width="118" height="34" rx="7" fill="#BE7611" fill-opacity=".14" stroke="#BE7611"/>
+    <text x="115" y="368" class="Ltag" fill="#BE7611" text-anchor="middle">原语层</text>
+    <text x="196" y="358" class="Lttl">地基 · 人人依赖的抽象</text>
+    <rect x="196" y="374" width="222" height="44" rx="8" class="box" fill="#FBF4E8" stroke="#1F8F5F"/>
+    <text x="208" y="393" class="bxt">message.py ✅</text>
+    <text x="208" y="408" class="bxm">M1 Message·Role·ToolCall</text>
+    <rect x="432" y="374" width="222" height="44" rx="8" class="box" fill="#FBF4E8" stroke="#1F8F5F"/>
+    <text x="444" y="393" class="bxt">model.py ✅</text>
+    <text x="444" y="408" class="bxm">M1 Model 抽象 + MockModel</text>
+    <rect x="668" y="374" width="222" height="44" rx="8" class="box" fill="#FBF4E8" stroke="#1F8F5F"/>
+    <text x="680" y="393" class="bxt">tool.py ✅</text>
+    <text x="680" y="408" class="bxm">M3 Tool/Registry · Read·Clock·Write</text>
+    <rect x="904" y="374" width="222" height="44" rx="8" class="box" fill="#FBF4E8" stroke="#1F8F5F"/>
+    <text x="916" y="393" class="bxt">context.py ✅</text>
+    <text x="916" y="408" class="bxm">M3 RunContext abort·depth·child()</text>
+
+    <!-- 适配层 -->
+    <rect x="40" y="440" width="1100" height="98" rx="11" class="Lcard" stroke="#1F8F5F"/>
+    <rect x="56" y="454" width="118" height="34" rx="7" fill="#1F8F5F" fill-opacity=".12" stroke="#1F8F5F"/>
+    <text x="115" y="476" class="Ltag" fill="#1F8F5F" text-anchor="middle">适配层</text>
+    <text x="196" y="466" class="Lttl">provider · 都实现同一个 Model.complete()</text>
+    <rect x="196" y="482" width="300" height="44" rx="8" class="box" fill="#ECF6F0" stroke="#1F8F5F"/>
+    <text x="208" y="501" class="bxt">providers/ make_model() ✅</text>
+    <text x="208" y="516" class="bxm">M1 工厂:按名字造 provider</text>
+    <rect x="510" y="482" width="300" height="44" rx="8" class="box" fill="#ECF6F0" stroke="#1F8F5F"/>
+    <text x="522" y="501" class="bxt">BedrockClaudeModel ✅</text>
+    <text x="522" y="516" class="bxm">真 Claude via AWS Bedrock · 工具调用双向翻译</text>
+    <rect x="824" y="482" width="302" height="44" rx="8" class="box" fill="#FFF" stroke="#9A8F7B" stroke-dasharray="4 3"/>
+    <text x="836" y="501" class="bxt" fill="#6E6353">OpenAI / 国内模型 …</text>
+    <text x="836" y="516" class="bxm">M9 多 provider 切换 · 未来</text>
+
+    <!-- 依赖方向 -->
+    <g stroke="#6D45C9" stroke-width="1.5" marker-end="url(#down)" opacity=".7">
+      <line x1="1158" y1="116" x2="1158" y2="106"/>
+    </g>
+    <text x="1150" y="575" class="dep" text-anchor="end">▲ 依赖只能向下:上层调下层,下层永不知道上层存在</text>
+    <text x="40" y="575" class="dep">铁律:内核只认 Message / Tool / Model 三个抽象,不知道用哪家模型、是不是子 Agent</text>
+
+    <!-- 横切:cli / tests -->
+    <rect x="40" y="592" width="540" height="50" rx="10" fill="#FFFEFB" stroke="#9A8F7B" stroke-width="1.4"/>
+    <text x="56" y="613" class="bxt">cli.py</text>
+    <text x="56" y="630" class="bxm">进度看板 + `orchestra chat`(M5 多 Agent via Bedrock)· 装配各层</text>
+    <rect x="600" y="592" width="540" height="50" rx="10" fill="#FFFEFB" stroke="#9A8F7B" stroke-width="1.4"/>
+    <text x="616" y="613" class="bxt">tests/</text>
+    <text x="616" y="630" class="bxm">smoke · m3_agent_loop · m4_orchestration · m5_subagent —— 17 passed</text>
+  </svg>
+
+  <div class="divider"></div>
+
+  <!-- ===================== 图 ②:模块依赖 + 数据流 + 递归 ===================== -->
+  <div class="eyebrow" style="margin-top:30px">Module Graph · 调用 / 数据流 / 递归</div>
+  <h2>模块依赖与数据流<span class="dim"> · 控制流向下派发,数据流向上回灌,AgentTool 递归回主循环</span></h2>
+
+  <svg viewBox="0 0 1180 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="模块依赖与数据流">
+    <defs>
+      <marker id="ctl" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#6D45C9"/></marker>
+      <marker id="dat" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0C9486"/></marker>
+      <marker id="rec" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6D45C9"/></marker>
+      <marker id="ex" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#1F8F5F"/></marker>
+      <style>
+        .mod{fill:#FFFEFB;stroke-width:1.6}
+        .modt{font-weight:700;font-size:13px;fill:#2B2417}
+        .modf{font-family:var(--mono);font-size:9px;fill:#9A8F7B}
+        .lbl{font-family:var(--mono);font-size:9.5px;fill:#6E6353}
+      </style>
+    </defs>
+
+    <!-- cli -->
+    <rect x="470" y="22" width="240" height="50" rx="10" class="mod" stroke="#9A8F7B"/>
+    <text x="590" y="44" class="modt" text-anchor="middle">cli.py</text>
+    <text x="590" y="61" class="modf" text-anchor="middle">装配 model + 工具 + registry → 启动 chat</text>
+
+    <!-- collab row -->
+    <rect x="120" y="118" width="220" height="56" rx="10" class="mod" stroke="#6D45C9"/>
+    <text x="230" y="141" class="modt" text-anchor="middle">subagent.py</text>
+    <text x="230" y="159" class="modf" text-anchor="middle">AgentTool(spawn_agent)✅</text>
+    <rect x="480" y="118" width="220" height="56" rx="10" class="mod" stroke="#C8344E" stroke-dasharray="5 4"/>
+    <text x="590" y="141" class="modt" text-anchor="middle" fill="#6E6353">coordinator.py</text>
+    <text x="590" y="159" class="modf" text-anchor="middle">M6 ⛔ 占位桩</text>
+    <rect x="840" y="118" width="220" height="56" rx="10" class="mod" stroke="#C8344E" stroke-dasharray="5 4"/>
+    <text x="950" y="141" class="modt" text-anchor="middle" fill="#6E6353">mailbox.py</text>
+    <text x="950" y="159" class="modf" text-anchor="middle">M7 ⛔ 占位桩</text>
+
+    <!-- loop -->
+    <rect x="420" y="232" width="340" height="58" rx="10" class="mod" stroke="#0C9486" stroke-width="2"/>
+    <text x="590" y="256" class="modt" text-anchor="middle">loop.py · run_agent_turn()</text>
+    <text x="590" y="274" class="modf" text-anchor="middle">ReAct while 循环 · maxTurns=10 · 内核脊柱</text>
+
+    <!-- orchestration -->
+    <rect x="420" y="330" width="340" height="58" rx="10" class="mod" stroke="#0C9486"/>
+    <text x="590" y="354" class="modt" text-anchor="middle">orchestration.py · run_tools()</text>
+    <text x="590" y="372" class="modf" text-anchor="middle">partition → 读并发批 / 写独占批 · 流式 yield</text>
+
+    <!-- primitives row -->
+    <rect x="70" y="446" width="200" height="54" rx="10" class="mod" stroke="#BE7611"/>
+    <text x="170" y="469" class="modt" text-anchor="middle">tool.py</text>
+    <text x="170" y="486" class="modf" text-anchor="middle">Tool / Registry / 示例工具</text>
+    <rect x="300" y="446" width="200" height="54" rx="10" class="mod" stroke="#BE7611"/>
+    <text x="400" y="469" class="modt" text-anchor="middle">context.py</text>
+    <text x="400" y="486" class="modf" text-anchor="middle">RunContext abort·depth</text>
+    <rect x="530" y="446" width="200" height="54" rx="10" class="mod" stroke="#BE7611"/>
+    <text x="630" y="469" class="modt" text-anchor="middle">message.py</text>
+    <text x="630" y="486" class="modf" text-anchor="middle">Message·Role·ToolCall</text>
+    <rect x="760" y="446" width="200" height="54" rx="10" class="mod" stroke="#BE7611"/>
+    <text x="860" y="469" class="modt" text-anchor="middle">model.py</text>
+    <text x="860" y="486" class="modf" text-anchor="middle">Model 抽象 + MockModel</text>
+
+    <!-- provider (external) -->
+    <rect x="980" y="232" width="160" height="156" rx="12" fill="#ECF6F0" stroke="#1F8F5F" stroke-width="1.5"/>
+    <text x="1060" y="258" class="modt" text-anchor="middle" fill="#1F8F5F">providers/</text>
+    <text x="1060" y="276" class="modf" text-anchor="middle">make_model()</text>
+    <text x="1060" y="300" class="modf" text-anchor="middle">BedrockClaude</text>
+    <text x="1060" y="316" class="modf" text-anchor="middle">Model ✅</text>
+    <text x="1060" y="346" class="lbl" text-anchor="middle" fill="#1F8F5F">↔ 真 Claude</text>
+    <text x="1060" y="362" class="lbl" text-anchor="middle" fill="#1F8F5F">AWS Bedrock</text>
+
+    <!-- edges: cli -> collab -->
+    <g stroke="#6D45C9" stroke-width="1.5" fill="none" marker-end="url(#ctl)">
+      <path d="M520,72 C400,92 300,98 250,116"/>
+      <path d="M590,72 L590,116"/>
+      <path d="M660,72 C800,92 900,98 945,116"/>
+    </g>
+    <!-- subagent -> loop -->
+    <path d="M260,174 C320,205 380,218 430,232" fill="none" stroke="#6D45C9" stroke-width="1.5" marker-end="url(#ctl)"/>
+    <!-- recursion: AgentTool.run -> run_agent_turn -->
+    <path d="M150,174 C70,260 90,360 360,300 C400,292 410,288 418,284" fill="none" stroke="#6D45C9" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#rec)"/>
+    <text x="86" y="330" class="lbl" fill="#6D45C9">⟳ 递归:AgentTool.run() 结尾</text>
+    <text x="86" y="345" class="lbl" fill="#6D45C9">再调一次 run_agent_turn —</text>
+    <text x="86" y="360" class="lbl" fill="#6D45C9">这一行 = 「多 Agent」全部秘密</text>
+
+    <!-- loop <-> orchestration -->
+    <line x1="560" y1="290" x2="560" y2="330" stroke="#6D45C9" stroke-width="1.6" marker-end="url(#ctl)"/>
+    <line x1="620" y1="330" x2="620" y2="290" stroke="#0C9486" stroke-width="1.6" marker-end="url(#dat)"/>
+    <text x="470" y="314" class="lbl">派工具↓</text>
+    <text x="628" y="314" class="lbl" fill="#0C9486">tool_result↑</text>
+
+    <!-- orchestration -> primitives -->
+    <g stroke="#6D45C9" stroke-width="1.3" fill="none" marker-end="url(#ctl)" opacity=".85">
+      <path d="M470,388 C340,410 230,420 180,446"/>
+      <path d="M520,388 C470,415 430,425 408,446"/>
+    </g>
+    <!-- loop -> model/message -->
+    <g stroke="#6D45C9" stroke-width="1.3" fill="none" marker-end="url(#ctl)" opacity=".85">
+      <path d="M700,290 C720,400 760,430 690,446"/>
+      <path d="M740,288 C840,400 860,430 862,446"/>
+    </g>
+    <!-- loop -> provider (model.complete) -->
+    <path d="M760,250 C870,250 920,270 978,278" fill="none" stroke="#6D45C9" stroke-width="1.5" marker-end="url(#ctl)"/>
+    <path d="M978,330 C900,340 850,320 762,300" fill="none" stroke="#0C9486" stroke-width="1.5" marker-end="url(#dat)"/>
+    <text x="828" y="262" class="lbl">model.complete()↓</text>
+    <text x="820" y="338" class="lbl" fill="#0C9486">assistant 消息↑</text>
+
+    <!-- legend -->
+    <g transform="translate(70,524)">
+      <line x1="0" y1="8" x2="34" y2="8" stroke="#6D45C9" stroke-width="1.6" marker-end="url(#ctl)"/>
+      <text x="42" y="12" class="lbl">控制流 · 向下派发 / 调用</text>
+      <line x1="270" y1="8" x2="304" y2="8" stroke="#0C9486" stroke-width="1.6" marker-end="url(#dat)"/>
+      <text x="312" y="12" class="lbl">数据流 · 结果向上回灌</text>
+      <line x1="520" y1="8" x2="554" y2="8" stroke="#6D45C9" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#rec)"/>
+      <text x="562" y="12" class="lbl">递归 · 子 Agent 回到主循环</text>
+      <line x1="820" y1="8" x2="854" y2="8" stroke="#1F8F5F" stroke-width="1.5" marker-end="url(#ex)"/>
+      <text x="862" y="12" class="lbl">外部 · Bedrock</text>
+    </g>
+  </svg>
+
+  <div class="divider"></div>
+
+  <!-- ===================== 图 ③:ReAct 循环 + 工具分批(内核细节) ===================== -->
+  <div class="eyebrow" style="margin-top:30px">Kernel Detail · run_agent_turn + partition_tool_calls</div>
+  <h2>内核细节<span class="dim"> · 一轮 ReAct 怎么跑,一轮的多个工具怎么分批</span></h2>
+
+  <svg viewBox="0 0 1180 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ReAct 循环与工具分批">
+    <defs>
+      <marker id="f2" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2563EB"/></marker>
+      <marker id="g2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#6E6353"/></marker>
+      <style>
+        .rc{fill:#EEF3FF;stroke:#2563EB;stroke-width:1.5}
+        .rct{font-weight:700;font-size:13px;fill:#2B2417}
+        .rcs{font-family:var(--mono);font-size:9px;fill:#6E6353}
+        .pc{fill:#FFFEFB;stroke-width:1.4}
+        .pct{font-weight:700;font-size:11.5px;fill:#2B2417}
+        .pcs{font-family:var(--mono);font-size:8.5px;fill:#9A8F7B}
+      </style>
+    </defs>
+
+    <!-- left: ReAct loop -->
+    <text x="40" y="28" class="rct" style="font-size:14px;fill:#2563EB">loop.py · while range(maxTurns=10)</text>
+    <rect x="40" y="42" width="470" height="392" rx="14" fill="#FFFFFF" stroke="#2563EB" stroke-width="1.4" stroke-dasharray="6 5"/>
+
+    <rect x="150" y="70" width="250" height="56" rx="10" class="rc"/>
+    <text x="275" y="93" class="rct" text-anchor="middle">想 Reason</text>
+    <text x="275" y="111" class="rcs" text-anchor="middle">model.complete(messages, tools)</text>
+
+    <rect x="290" y="200" width="200" height="56" rx="10" class="rc"/>
+    <text x="390" y="223" class="rct" text-anchor="middle">做 Act</text>
+    <text x="390" y="241" class="rcs" text-anchor="middle">run_tools(tool_calls)</text>
+
+    <rect x="62" y="200" width="200" height="56" rx="10" class="rc"/>
+    <text x="162" y="223" class="rct" text-anchor="middle">看 Observe</text>
+    <text x="162" y="241" class="rcs" text-anchor="middle">tool_result → messages</text>
+
+    <!-- exit -->
+    <rect x="150" y="338" width="250" height="56" rx="10" fill="#EFFAF8" stroke="#1F8F5F" stroke-width="1.5"/>
+    <text x="275" y="361" class="rct" text-anchor="middle">收尾</text>
+    <text x="275" y="379" class="rcs" text-anchor="middle">模型不再要工具 → return</text>
+
+    <path d="M340,126 C420,150 440,175 430,198" fill="none" stroke="#2563EB" stroke-width="1.6" marker-end="url(#f2)"/>
+    <path d="M290,228 L264,228" fill="none" stroke="#2563EB" stroke-width="1.6" marker-end="url(#f2)"/>
+    <path d="M160,200 C150,175 170,150 215,128" fill="none" stroke="#2563EB" stroke-width="1.6" marker-end="url(#f2)"/>
+    <text x="275" y="170" class="rcs" text-anchor="middle" fill="#2563EB">↺ 工具结果回灌,下一轮再想</text>
+    <path d="M250,126 C235,250 235,300 260,338" fill="none" stroke="#1F8F5F" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#f2)"/>
+    <text x="190" y="300" class="rcs" fill="#1F8F5F">无 tool_calls</text>
+
+    <!-- right: partition -->
+    <text x="560" y="28" class="rct" style="font-size:14px;fill:#0C9486">orchestration.py · partition_tool_calls</text>
+    <rect x="560" y="42" width="580" height="392" rx="14" fill="#F3FBFA" stroke="#0C9486" stroke-width="1.4"/>
+
+    <text x="582" y="70" class="pcs" style="font-size:10px">一轮里模型要的多个工具调用(按出现顺序):</text>
+    <g>
+      <rect x="582" y="80" width="86" height="34" rx="7" class="pc" stroke="#1F8F5F"/>
+      <text x="625" y="101" class="pct" text-anchor="middle">Read</text>
+      <rect x="676" y="80" width="86" height="34" rx="7" class="pc" stroke="#1F8F5F"/>
+      <text x="719" y="101" class="pct" text-anchor="middle">Read</text>
+      <rect x="770" y="80" width="96" height="34" rx="7" class="pc" stroke="#C8344E"/>
+      <text x="818" y="101" class="pct" text-anchor="middle">Write</text>
+      <rect x="874" y="80" width="86" height="34" rx="7" class="pc" stroke="#1F8F5F"/>
+      <text x="917" y="101" class="pct" text-anchor="middle">Read</text>
+    </g>
+    <text x="968" y="101" class="pcs">← is_concurrency_safe</text>
+    <text x="968" y="113" class="pcs">  自己声明(未知=不安全)</text>
+
+    <line x1="760" y1="120" x2="760" y2="142" stroke="#6E6353" stroke-width="1.4" marker-end="url(#g2)"/>
+    <text x="772" y="136" class="pcs">连续切分(写工具打断只读批,保住先后语义)</text>
+
+    <!-- batch 1: read concurrent -->
+    <rect x="582" y="152" width="240" height="120" rx="10" fill="#ECF6F0" stroke="#1F8F5F" stroke-width="1.5"/>
+    <text x="598" y="172" class="pct" fill="#1F8F5F">批1 · 只读并发</text>
+    <text x="598" y="187" class="pcs">asyncio.gather + Semaphore(10)</text>
+    <rect x="598" y="200" width="92" height="30" rx="6" class="pc" stroke="#1F8F5F"/>
+    <text x="644" y="220" class="pct" text-anchor="middle">Read</text>
+    <rect x="700" y="200" width="92" height="30" rx="6" class="pc" stroke="#1F8F5F"/>
+    <text x="746" y="220" class="pct" text-anchor="middle">Read</text>
+    <text x="598" y="252" class="pcs">谁先好谁先 yield(as_completed)</text>
+    <text x="598" y="265" class="pcs">完成顺序≠原序,靠 tool_call_id 配对</text>
+
+    <!-- batch 2: write exclusive -->
+    <rect x="838" y="152" width="140" height="120" rx="10" fill="#FBEEE9" stroke="#C8344E" stroke-width="1.5"/>
+    <text x="854" y="172" class="pct" fill="#C8344E">批2 · 写独占</text>
+    <text x="854" y="187" class="pcs">串行 await</text>
+    <rect x="854" y="200" width="100" height="30" rx="6" class="pc" stroke="#C8344E"/>
+    <text x="904" y="220" class="pct" text-anchor="middle">Write</text>
+    <text x="854" y="252" class="pcs">自己一批</text>
+    <text x="854" y="265" class="pcs">不和别人并发</text>
+
+    <!-- batch 3 -->
+    <rect x="994" y="152" width="124" height="120" rx="10" fill="#ECF6F0" stroke="#1F8F5F" stroke-width="1.5"/>
+    <text x="1010" y="172" class="pct" fill="#1F8F5F">批3 · 只读</text>
+    <rect x="1010" y="200" width="92" height="30" rx="6" class="pc" stroke="#1F8F5F"/>
+    <text x="1056" y="220" class="pct" text-anchor="middle">Read</text>
+    <text x="1010" y="252" class="pcs">落单的读</text>
+    <text x="1010" y="265" class="pcs">也单独跑</text>
+
+    <text x="582" y="300" class="pcs" style="font-size:10px;fill:#6E6353">分批结果:[Read,Read] → [Write] → [Read]　三批【顺序】执行,批内只读才并发。</text>
+
+    <!-- the punchline -->
+    <rect x="582" y="320" width="536" height="96" rx="10" fill="#F4EFFB" stroke="#6D45C9" stroke-width="1.5"/>
+    <text x="600" y="343" class="pct" fill="#6D45C9">⭐ 多 Agent 并行是「白捡」的</text>
+    <text x="600" y="364" class="pcs" style="font-size:9.5px">AgentTool.is_concurrency_safe = True → 多个 spawn_agent 调用自动落入「只读并发批」。</text>
+    <text x="600" y="380" class="pcs" style="font-size:9.5px">没有为「多 Agent 并行」写任何专门调度代码 —— 它是分批规则的副产品。</text>
+    <text x="600" y="400" class="pcs" style="font-size:9.5px">防套娃:子 Agent 默认拿不到 spawn_agent(allow_nesting=False)+ prompt 纪律 + max_depth=2 兜底。</text>
+  </svg>
+
+  <!-- 迭代状态表 -->
+  <h2 style="margin-top:40px">迭代状态<span class="dim"> · 取自 cli.py 的 MILESTONES(done 标记)</span></h2>
+  <table>
+    <thead><tr><th>里程碑</th><th>内容</th><th>落地文件</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>M0</td><td>项目骨架(uv / lint / test / 占位模块)</td><td><code>pyproject.toml</code> 等</td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M1</td><td>直接调真实 LLM:单轮对话</td><td><code>providers/bedrock.py</code> · <code>model.py</code> · <code>message.py</code></td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M2</td><td>多轮对话循环:上下文记忆</td><td><code>loop.py</code> run_chat_loop</td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M3</td><td>第一个工具 · ReAct 循环 + maxTurns</td><td><code>tool.py</code> · <code>context.py</code> · <code>loop.py</code></td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M4</td><td>多工具并发:读并发 / 写独占</td><td><code>orchestration.py</code></td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M5</td><td>子 Agent:递归 + 上下文隔离 + 防套娃三道防线</td><td><code>subagent.py</code></td><td class="ok">✅ 已实现</td></tr>
+      <tr><td>M6</td><td>协调器:Orchestrator-Workers 星型</td><td><code>coordinator.py</code></td><td class="stub">⛔ 占位桩(NotImplementedError)</td></tr>
+      <tr><td>M7</td><td>Agent 间通信:mailbox + SendMessage 网状</td><td><code>mailbox.py</code></td><td class="stub">⛔ 占位桩(NotImplementedError)</td></tr>
+      <tr><td>M8</td><td>评估-优化循环</td><td><code>examples/</code></td><td class="future">⬜ 未来</td></tr>
+      <tr><td>M9</td><td>多 provider 切换</td><td><code>providers/</code></td><td class="future">⬜ 未来</td></tr>
+      <tr><td>M10</td><td>调研工具 + 溯源 / 防幻觉</td><td>—</td><td class="future">⬜ 未来</td></tr>
+      <tr><td>M11</td><td>业务编排:老外挖中国供应商</td><td>—</td><td class="future">⬜ 未来</td></tr>
+    </tbody>
+  </table>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#1F8F5F"></i>已实现 · 测试覆盖</span>
+    <span><i class="sw" style="background:#C8344E"></i>占位桩 · raise NotImplementedError</span>
+    <span><i class="sw" style="background:#9A8F7B"></i>未来迭代 · 仓库尚不存在</span>
+  </div>
+
+  <div class="tip">
+    <p><b>一句话读懂当前架构:</b>目前能跑通的是一条 <b>M0→M5</b> 的纵切 —— <code>cli.py</code> 装配出 <code>BedrockClaudeModel</code> + 一组工具,<code>loop.py</code> 的 <code>run_agent_turn</code> 跑 ReAct 主循环,每轮把工具交给 <code>orchestration.py</code> 按「读并发 / 写独占」分批执行;<code>subagent.py</code> 的 <code>AgentTool</code> 通过<b>再调一次主循环</b>实现子 Agent,并靠 <code>is_concurrency_safe=True</code> 白捡并行。<b>协作层的另外两块(<code>coordinator.py</code> M6 星型、<code>mailbox.py</code> M7 网状)目前是 <code>raise NotImplementedError</code> 占位桩</b>,业务层(M8–M11)尚未动工。所以这张图的下半部和右半部是「骨架已留好接口、实现待填」—— 这正是项目「学习导向、一个迭代填一块」的设计意图。</p>
+  </div>
+
+</div>
+</body>
+</html>

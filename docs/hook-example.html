@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hook 实例 · 它到底怎么和 Agent 配合（一个场景从头追到尾）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4EAD9; --ink:#2B2417; --ink2:#6E6353; --ink3:#9A8F7B;
+    --orch:#6D45C9; --harn:#0C9486; --react:#2563EB; --model:#BE7611;
+    --cross:#C8344E; --ext:#1F8F5F; --ok:#1F8F5F;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:'Inter','Noto Sans SC',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 560px at 84% -12%, rgba(190,118,17,.10), transparent 60%),
+      radial-gradient(900px 620px at -8% 110%, rgba(200,52,78,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans);
+    padding:clamp(16px,3vw,40px);
+  }
+  .wrap{max-width:980px;margin:0 auto}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px}
+  h1{font-size:clamp(21px,3.4vw,32px);font-weight:700;letter-spacing:-.02em;line-height:1.12}
+  h1 .dim{color:var(--ink2);font-weight:500}
+  p.sub{color:var(--ink2);font-size:14px;margin-top:10px;line-height:1.65}
+  p.sub code{font-family:var(--mono);font-size:12.5px;background:rgba(43,36,23,.06);padding:1px 5px;border-radius:4px}
+
+  .scn{background:#FFFEFB;border:1px solid rgba(43,36,23,.15);border-radius:12px;padding:16px 20px;margin-top:18px}
+  .scn .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink3)}
+  .scn .ask{font-size:16px;font-weight:600;margin-top:4px}
+
+  .cfg{background:#1E1A12;border-radius:12px;padding:16px 18px;margin-top:14px;overflow:auto}
+  .cfg .cfglbl{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#C8B89A;margin-bottom:8px}
+  .cfg pre{font-family:var(--mono);font-size:12px;line-height:1.6;color:#E8DCC4;white-space:pre}
+  .cfg .k{color:#E0A458}.cfg .s{color:#9DC08B}.cfg .c{color:#7A7060;font-style:italic}
+
+  /* timeline */
+  .tl{margin-top:26px;position:relative}
+  .step{display:grid;grid-template-columns:48px 1fr;gap:16px;margin-bottom:8px}
+  .num{width:48px}
+  .num .dot{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;font-family:var(--mono);color:#fff}
+  .num .line{width:2px;flex:1;margin:4px auto 0;min-height:18px}
+  .num{display:flex;flex-direction:column;align-items:center}
+  .body{padding-bottom:18px}
+  .body h3{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .body .who{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:5px;font-weight:700;letter-spacing:.04em}
+  .body p{font-size:13.5px;color:var(--ink2);margin-top:5px;line-height:1.6}
+  .body code{font-family:var(--mono);font-size:12px;background:rgba(43,36,23,.06);padding:1px 5px;border-radius:4px}
+
+  .who-agent{background:rgba(37,99,235,.12);color:#2563EB}
+  .who-hook{background:rgba(200,52,78,.12);color:#C8344E}
+  .who-harness{background:rgba(12,148,134,.12);color:#0C9486}
+  .who-model{background:rgba(190,118,17,.14);color:#BE7611}
+
+  .json{background:#1E1A12;border-radius:9px;padding:11px 14px;margin-top:8px;overflow:auto}
+  .json .jl{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#C8B89A;margin-bottom:6px}
+  .json pre{font-family:var(--mono);font-size:11.5px;line-height:1.55;color:#E8DCC4;white-space:pre}
+  .json .k{color:#E0A458}.json .s{color:#9DC08B}.json .deny{color:#E5707E;font-weight:700}.json .ok{color:#9DC08B;font-weight:700}
+
+  .verdict{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px}
+  .v-block{background:rgba(200,52,78,.14);color:#C8344E}
+  .v-pass{background:rgba(31,143,95,.14);color:#1F8F5F}
+
+  .tip{background:rgba(109,69,201,.07);border:1px solid rgba(109,69,201,.28);border-radius:10px;padding:14px 18px;margin-top:26px}
+  .tip b{color:var(--orch)}
+  .tip p{font-size:13.5px;color:var(--ink2);line-height:1.7;margin:0}
+  .tip code{font-family:var(--mono);font-size:12px;background:rgba(43,36,23,.06);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Hook · Worked Example</div>
+  <h1>Hook 到底怎么和 Agent 配合<span class="dim"> · 一个场景,从头追到尾</span></h1>
+  <p class="sub">光看"29 个事件"记不住。这里只用<b>一个真实场景</b>,把 hook 怎么"插一脚、改变 Agent 走向"完整演一遍。看完你就懂了:<b>hook = Agent 干活到某一步时,先停下来问一句"我登记的脚本同不同意",再按回答决定下一步。</b></p>
+
+  <!-- 场景 -->
+  <div class="scn">
+    <div class="lbl">场景</div>
+    <div class="ask">你对 Claude 说:"帮我把数据库密码写进 <code style="font-size:14px">config.py</code>"</div>
+    <p class="sub" style="margin-top:8px">你<b>提前</b>在 <code>~/.claude/settings.json</code> 里登记了两个 hook(下面这段)。注意:<b>你只是写了配置,没碰任何 Agent 代码</b>。</p>
+  </div>
+
+  <!-- 配置 -->
+  <div class="cfg">
+    <div class="cfglbl">~/.claude/settings.json（你登记的两个 hook）</div>
+<pre><span class="k">"hooks"</span>: {
+  <span class="c">// ① 写文件【前】:跑 guard-secrets.sh 审一道</span>
+  <span class="k">"PreToolUse"</span>: [{
+    <span class="k">"matcher"</span>: <span class="s">"Write"</span>,            <span class="c">// 只在调用 Write 工具时触发</span>
+    <span class="k">"hooks"</span>: [{ <span class="k">"type"</span>:<span class="s">"command"</span>, <span class="k">"command"</span>:<span class="s">"./guard-secrets.sh"</span> }]
+  }],
+  <span class="c">// ② 写文件【后】:自动跑格式化</span>
+  <span class="k">"PostToolUse"</span>: [{
+    <span class="k">"matcher"</span>: <span class="s">"Write"</span>,
+    <span class="k">"hooks"</span>: [{ <span class="k">"type"</span>:<span class="s">"command"</span>, <span class="k">"command"</span>:<span class="s">"black ."</span> }]
+  }]
+}</pre>
+  </div>
+
+  <!-- 时间线 -->
+  <div class="tl">
+
+    <!-- 1 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#2563EB">1</div><div class="line" style="background:#2563EB"></div></div>
+      <div class="body">
+        <h3><span class="who who-model">MODEL</span> 模型决定:调 Write 工具写 config.py</h3>
+        <p>Claude 读懂你的话,产出一个工具调用:<code>Write(file_path="config.py", content="DB_PASSWORD=hunter2")</code>。这时工具<b>还没真正执行</b>。</p>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#0C9486">2</div><div class="line" style="background:#C8344E"></div></div>
+      <div class="body">
+        <h3><span class="who who-harness">HARNESS</span> 到了 PreToolUse 节点 → 触发 hook</h3>
+        <p>Harness 在<b>真正写文件之前</b>停一下,发现你登记了 <code>PreToolUse</code> + <code>matcher:"Write"</code>,匹配!于是把当前信息打包成 JSON,通过标准输入喂给 <code>guard-secrets.sh</code>:</p>
+        <div class="json">
+          <div class="jl">Harness → hook 脚本（stdin 收到的输入）</div>
+<pre>{
+  <span class="k">"hook_event_name"</span>: <span class="s">"PreToolUse"</span>,
+  <span class="k">"tool_name"</span>: <span class="s">"Write"</span>,
+  <span class="k">"tool_input"</span>: {
+    <span class="k">"file_path"</span>: <span class="s">"config.py"</span>,
+    <span class="k">"content"</span>: <span class="s">"DB_PASSWORD=hunter2"</span>
+  }
+}</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#C8344E">3</div><div class="line" style="background:#C8344E"></div></div>
+      <div class="body">
+        <h3><span class="who who-hook">HOOK</span> 脚本判断:明文密码写进 .py?不行!</h3>
+        <p><code>guard-secrets.sh</code> 检查到 content 里有 <code>DB_PASSWORD=</code> 且目标是 <code>.py</code> 文件,打印一段 JSON 到标准输出,<b>裁决 deny(拒绝)</b>:</p>
+        <div class="json">
+          <div class="jl">hook 脚本 → Harness（stdout 返回的决策）</div>
+<pre>{
+  <span class="k">"hookSpecificOutput"</span>: {
+    <span class="k">"permissionDecision"</span>: <span class="deny">"deny"</span>,
+    <span class="k">"permissionDecisionReason"</span>:
+      <span class="s">"禁止把明文密码写进 .py,请改用环境变量"</span>
+  }
+}</pre>
+        </div>
+        <span class="verdict v-block">⛔ 裁决 = deny → 这次 Write 被拦下,不执行</span>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#2563EB">4</div><div class="line" style="background:#2563EB"></div></div>
+      <div class="body">
+        <h3><span class="who who-model">MODEL</span> 模型收到"被拒 + 原因",换个方案</h3>
+        <p>关键就在这:被拦下的<b>原因</b>会作为观察结果回灌给模型。模型"看到"了 <i>"禁止明文密码,请改用环境变量"</i>,于是<b>自己改主意</b>——不写 config.py 了,改成:① 把密码写进 <code>.env</code>;② 让 config.py 从环境变量读。</p>
+        <p style="color:var(--orch);font-weight:600">↑ 这就是 hook 最妙的地方:它没有"报错崩溃",而是把约束变成反馈,让 Agent 自己绕道。</p>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#0C9486">5</div><div class="line" style="background:#C8344E"></div></div>
+      <div class="body">
+        <h3><span class="who who-harness">HARNESS</span> 新的 Write(.env) 又触发 PreToolUse</h3>
+        <p>模型这次调 <code>Write(".env", "DB_PASSWORD=hunter2")</code>。Harness 又把它喂给 <code>guard-secrets.sh</code>。脚本规则是"<code>.env</code> 文件允许放密码",所以这次<b>放行</b>:</p>
+        <div class="json">
+          <div class="jl">hook 脚本 → Harness</div>
+<pre>{ <span class="k">"hookSpecificOutput"</span>: { <span class="k">"permissionDecision"</span>: <span class="ok">"allow"</span> } }</pre>
+        </div>
+        <span class="verdict v-pass">✅ 裁决 = allow → Write 正常执行,.env 写好了</span>
+      </div>
+    </div>
+
+    <!-- 6 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#C8344E">6</div><div class="line" style="background:#0C9486"></div></div>
+      <div class="body">
+        <h3><span class="who who-hook">HOOK</span> 写完后,PostToolUse 自动跑格式化</h3>
+        <p>文件写完,Harness 到 <code>PostToolUse</code> 节点,触发第二个 hook → 跑 <code>black .</code> 把代码格式化。它不改流程,只做"善后",跑完就继续。</p>
+      </div>
+    </div>
+
+    <!-- 7 -->
+    <div class="step">
+      <div class="num"><div class="dot" style="background:#BE7611">7</div></div>
+      <div class="body">
+        <h3><span class="who who-model">MODEL</span> 任务完成,回答你</h3>
+        <p>Claude 告诉你:"已把密码放进 .env,并让 config.py 从环境变量读取(没有把明文写进代码)。" —— <b>你想要的安全约束,全程没改一行 Agent 代码,只靠两个 hook 实现了。</b></p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="tip">
+    <p><b>读完这一个例子,"怎么配合"就清楚了:</b><br><br>
+    ① <b>你登记规则</b>(settings.json),不碰 Agent 代码;<br>
+    ② Agent 干活跑到某个节点(如"工具执行前"),<b>Harness 自动停一下</b>,把现场打包成 JSON 发给你的 hook;<br>
+    ③ <b>hook 返回 JSON 裁决</b>:<code>deny</code> 拦下 / <code>allow</code> 放行 / <code>additionalContext</code> 塞信息;<br>
+    ④ 被拦下时,<b>原因会回灌给模型</b>,模型自己绕道重试 —— 不是崩溃,是"协作"。<br><br>
+    <b>一句话:hook 就是你给 Agent 装的"红绿灯 + 摄像头"</b>——它跑到路口先看灯(你的脚本),灯说停就停、说走就走,而且为什么停会告诉司机(模型),让它换条路。29 个事件 = 29 个可以装红绿灯的路口,但机制全是这一套。</p>
+  </div>
+
+</div>
+</body>
+</html>
