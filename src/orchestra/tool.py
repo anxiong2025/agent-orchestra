@@ -8,10 +8,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
-from orchestra.context import RunContext
+from orchestra.context import FileMark, RunContext
 
 
 class Tool(ABC):
@@ -51,11 +52,18 @@ class ToolRegistry:
 
 
 class ReadFileTool(Tool):
-    """读文件(只读 → safe=True)。"""
+    """读文件(只读 → safe=True)。
+
+    M5.5:读取走 ctx.read_state 这份【可变缓存】—— 读完把文件元信息记进缓存。
+    这正是"需要被隔离的可变状态":子 Agent 读一堆文件只改它自己那份副本(见 RunContext.child),
+    父级的"文件视图"不受影响。对标 Claude Code 的 readFileState。
+    """
 
     name = "read_file"
     # 面向模型的描述用英文(中文见注释):读取本地文本文件的内容,参数 path 是文件路径。
-    description = "Read the contents of a local text file. Parameter `path` is the file path."
+    description = (
+        "Read the contents of a local text file. Parameter `path` is the file path."
+    )
     is_concurrency_safe = True
     input_schema = {
         "type": "object",
@@ -70,9 +78,14 @@ class ReadFileTool(Tool):
         def _read() -> str:
             try:
                 with open(path, encoding="utf-8") as f:
-                    return f.read()
+                    content = f.read()
             except OSError as e:
                 return f"读取失败: {e}"
+            # ★ 读成功后,把这个文件记进【本 Agent 自己的】读缓存(可变状态)。
+            #   子 Agent 在这里写的是它 child() 时拿到的副本,不会动到父级的缓存。
+            st = os.stat(path)
+            ctx.read_state.seen[path] = FileMark(size=st.st_size, mtime=st.st_mtime)
+            return content
 
         # 文件 IO 是阻塞的,丢到线程里,别卡事件循环(为 M4 并发铺路)。
         return await asyncio.to_thread(_read)

@@ -83,7 +83,9 @@ def main() -> None:
         if not done and next_todo is None:
             next_todo = f"{tag} —— {title}"
     print()
-    print("💬 现在就能体验: uv run orchestra chat  —— 多 Agent(M5,能派子 Agent 并行办活)")
+    print(
+        "💬 现在就能体验: uv run orchestra chat  —— 多 Agent(M5,能派子 Agent 并行办活)"
+    )
     print()
     if next_todo:
         print(f"👉 下一步: {next_todo}")

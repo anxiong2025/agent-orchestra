@@ -1,4 +1,4 @@
-"""M3 测试 —— 想→做→看循环 + maxTurns 熔断,全程用 MockModel,不烧 API。"""
+"""M3 测试 —— ReAct 循环(推理→行动→观察)+ maxTurns 熔断,全程用 MockModel,不烧 API。"""
 
 from __future__ import annotations
 

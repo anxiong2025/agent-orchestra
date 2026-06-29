@@ -32,7 +32,7 @@ async def main() -> None:
             try:
                 d = int(line.split("depth=")[1].split(")")[0])
                 max_depth_seen = max(max_depth_seen, d)
-            except (IndexError, ValueError):
+            except IndexError, ValueError:
                 pass
         print(line)
 

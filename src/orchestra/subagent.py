@@ -53,12 +53,12 @@ DEFAULT_MAX_DEPTH = 2
 #   · 结论简短(对标 "Keep your report under 500 words"):啰嗦输出几千字会让单次
 #     生成飙到 60 秒、还污染父级上下文 —— 强制收口。
 SUBAGENT_SYSTEM = (
-    "You are a sub-agent dispatched to complete a single, well-scoped task. "      # 你是被派来办一件具体子任务的子 Agent
-    "Use the tools available to you and complete the task directly yourself. "     # 用你手上的工具,自己直接干完
-    "Do NOT spawn new sub-agents — you are the worker. "                           # 别再派新的子 Agent,你就是干活的那个
-    "When done, give a concise final result the caller can use directly; "         # 完成后给出可直接使用的简洁结论
-    "do not narrate your process. "                                                # 不要复述过程
-    "Keep it under ~200 words — only the essential points the caller needs."       # 控制在 ~200 词内,只给父级需要的关键要点
+    "You are a sub-agent dispatched to complete a single, well-scoped task. "  # 你是被派来办一件具体子任务的子 Agent
+    "Use the tools available to you and complete the task directly yourself. "  # 用你手上的工具,自己直接干完
+    "Do NOT spawn new sub-agents — you are the worker. "  # 别再派新的子 Agent,你就是干活的那个
+    "When done, give a concise final result the caller can use directly; "  # 完成后给出可直接使用的简洁结论
+    "do not narrate your process. "  # 不要复述过程
+    "Keep it under ~200 words — only the essential points the caller needs."  # 控制在 ~200 词内,只给父级需要的关键要点
 )
 
 
@@ -155,11 +155,16 @@ class AgentTool(Tool):
             return "错误:task 不能为空 —— 请描述要派给子 Agent 的子任务。"
 
         if self._notify:
-            self._notify(f"  ↳ 派出子 Agent(depth={child_ctx.depth}): {task}")
+            self._notify(
+                f"  ↳ 派出子 Agent(#{child_ctx.agent_id}←父#{child_ctx.parent_id}, "
+                f"depth={child_ctx.depth}): {task}"
+            )
 
         # ── 上下文隔离:一份干净的 messages,只装系统提示 + 子任务 ──────────────
         # 关键:这里【不】把父级的历史抄进来 —— 子 Agent 看不到父级聊了什么,
         # 它在自己的小本子上从零开始,烧自己的 tokens。
+        # 注意:child_ctx 不止隔离了 messages —— 它还复制了一份 read_state(文件读缓存),
+        #       并带上了独立身份(agent_id/parent_id)。隔离的是【一切可变状态】(见 context.py)。
         sub_messages: list[Message] = [
             Message.system(SUBAGENT_SYSTEM),
             Message.user(task),
@@ -186,7 +191,7 @@ class AgentTool(Tool):
         # 父级只拿到这一句结论 —— 这就是"隔离保护父级上下文"的落点。
         conclusion = _final_conclusion(result_messages)
         if self._notify:
-            self._notify(f"  ↳ 子 Agent(depth={child_ctx.depth})交回结论")
+            self._notify(f"  ↳ 子 Agent(#{child_ctx.agent_id})交回结论")
         return conclusion
 
 
