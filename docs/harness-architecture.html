@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Harness 运行时架构 — agent-orchestra</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f4f0;
+    padding: 40px;
+    color: #2c2c2c;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 36px;
+  }
+
+  /* 主画布 */
+  .canvas {
+    display: grid;
+    grid-template-columns: 200px 1fr 200px;
+    grid-template-rows: auto auto auto;
+    gap: 0;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  /* L2 Harness 大框 */
+  .harness-box {
+    grid-column: 1 / 4;
+    border: 2.5px solid #2aab6f;
+    border-radius: 16px;
+    padding: 28px 28px 24px;
+    background: #f0fdf7;
+    position: relative;
+  }
+  .harness-label {
+    position: absolute;
+    top: -14px;
+    left: 24px;
+    background: #2aab6f;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 10px;
+    border-radius: 20px;
+    letter-spacing: 1px;
+  }
+  .harness-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a7a50;
+    margin-bottom: 4px;
+  }
+  .harness-desc {
+    font-size: 12px;
+    color: #5a9a78;
+    margin-bottom: 24px;
+  }
+
+  /* 四格模块行 */
+  .modules-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .module {
+    border-radius: 10px;
+    padding: 14px 14px 12px;
+    position: relative;
+  }
+  .module.done {
+    background: white;
+    border: 1.5px solid #c8e6d8;
+  }
+  .module.partial {
+    background: #fffbf0;
+    border: 1.5px dashed #f0c040;
+  }
+  .module.todo {
+    background: #fafafa;
+    border: 1.5px dashed #ccc;
+    opacity: 0.7;
+  }
+
+  .module-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  .badge-done { background: #d4f5e5; color: #1a7a50; }
+  .badge-partial { background: #fff3c4; color: #a07800; }
+  .badge-todo { background: #efefef; color: #888; }
+
+  .module-name {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .module-file {
+    font-size: 11px;
+    color: #888;
+    font-family: "SF Mono", Menlo, monospace;
+    margin-bottom: 8px;
+  }
+  .module-items {
+    list-style: none;
+    font-size: 11.5px;
+    line-height: 1.8;
+    color: #444;
+  }
+  .module-items li::before {
+    content: "·  ";
+    color: #aaa;
+  }
+  .module-items li.done-item { color: #2c7a50; }
+  .module-items li.todo-item { color: #bbb; }
+  .module-items li.todo-item::before { content: "○  "; color: #ddd; }
+
+  /* ReAct 循环嵌入框 */
+  .react-box {
+    border: 2px dashed #6b9fe0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    background: #f0f6ff;
+    margin-top: 4px;
+  }
+  .react-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #3a6fbe;
+    margin-bottom: 12px;
+  }
+  .react-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .react-node {
+    background: white;
+    border: 1.5px solid #9bbce8;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2a5aaa;
+    white-space: nowrap;
+  }
+  .react-arrow {
+    font-size: 16px;
+    color: #7aaae0;
+    margin: 0 6px;
+  }
+  .react-loop-hint {
+    font-size: 11px;
+    color: #7aaae0;
+    text-align: center;
+    margin-top: 8px;
+  }
+
+  /* 连接器 */
+  .connector-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 32px;
+    padding: 0 8px;
+  }
+  .connector {
+    text-align: center;
+    font-size: 11px;
+    color: #888;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .connector-arrow {
+    font-size: 20px;
+    color: #bbb;
+  }
+  .connector-label {
+    font-size: 10.5px;
+    color: #aaa;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+
+  /* 上下层标签 */
+  .layer-row {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0;
+  }
+  .layer-tag {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 14px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+  .layer-l3 { background: #e8e0ff; color: #5a3fbf; }
+  .layer-l2 { background: #d4f5e5; color: #1a7a50; }
+  .layer-l1 { background: #dbeafe; color: #1a4fbf; }
+  .layer-l0 { background: #fff3c4; color: #a07800; }
+
+  .layer-box {
+    border-radius: 10px;
+    padding: 10px 18px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+  .l3-box { background: #f0ecff; border: 1.5px solid #b8a8f0; color: #4a30af; }
+  .l0-box { background: #fffbea; border: 1.5px solid #e8d080; color: #8a6800; }
+
+  /* 图例 */
+  .legend {
+    display: flex;
+    gap: 20px;
+    margin-top: 28px;
+    font-size: 11.5px;
+    color: #666;
+    justify-content: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot {
+    width: 12px; height: 12px; border-radius: 3px;
+  }
+  .dot-done { background: #d4f5e5; border: 1px solid #2aab6f; }
+  .dot-partial { background: #fff3c4; border: 1px dashed #f0c040; }
+  .dot-todo { background: #efefef; border: 1px dashed #ccc; }
+</style>
+</head>
+<body>
+
+<h1>Harness 运行时架构</h1>
+<p class="subtitle">agent-orchestra · L2 层 · 单个 Agent 的引擎，真正执行的地方</p>
+
+<!-- L3 上层 -->
+<div class="layer-row">
+  <div class="layer-box l3-box">
+    L3 · 多 Agent 编排 &nbsp;—&nbsp; subagent.py (Fork) &nbsp;·&nbsp; coordinator.py (Coordinator) &nbsp;·&nbsp; M7 SendMessage (Team 网状)
+  </div>
+</div>
+<div class="layer-row" style="margin:6px 0">
+  <div style="font-size:20px;color:#aaa;">↓ 调用 run_agent_turn() &nbsp;&nbsp;&nbsp; ↑ 返回 messages[]</div>
+</div>
+
+<!-- L2 Harness 主框 -->
+<div style="max-width:1000px;margin:0 auto;">
+<div class="harness-box">
+  <div class="harness-label">L2</div>
+  <div class="harness-title">Harness 运行时</div>
+  <div class="harness-desc">单个 Agent 的引擎 · 负责循环控制 / Prompt 组装 / 上下文管理 / 工具执行</div>
+
+  <div class="modules-row">
+
+    <!-- Loop 控制 -->
+    <div class="module done">
+      <div class="module-badge badge-done">✅ 已实现</div>
+      <div class="module-name">Loop 控制</div>
+      <div class="module-file">loop.py</div>
+      <ul class="module-items">
+        <li class="done-item">run_agent_turn()</li>
+        <li class="done-item">max_turns 熔断</li>
+        <li class="done-item">inject_pending_notifications() M6</li>
+        <li class="done-item">run_chat_loop() REPL</li>
+        <li class="todo-item">流式输出 streaming</li>
+      </ul>
+    </div>
+
+    <!-- 工具执行 -->
+    <div class="module done">
+      <div class="module-badge badge-done">✅ 已实现</div>
+      <div class="module-name">工具执行 + 并发</div>
+      <div class="module-file">orchestration.py · tool.py</div>
+      <ul class="module-items">
+        <li class="done-item">partition_tool_calls()</li>
+        <li class="done-item">读并发 / 写独占</li>
+        <li class="done-item">Semaphore 限流(10)</li>
+        <li class="done-item">ToolRegistry 注册表</li>
+        <li class="todo-item">MCP 工具接入</li>
+      </ul>
+    </div>
+
+    <!-- 上下文管理 -->
+    <div class="module done">
+      <div class="module-badge badge-done">✅ 已实现</div>
+      <div class="module-name">上下文管理</div>
+      <div class="module-file">context.py · mailbox.py</div>
+      <ul class="module-items">
+        <li class="done-item">RunContext + child()</li>
+        <li class="done-item">abort 共享取消</li>
+        <li class="done-item">read_state 隔离复制</li>
+        <li class="done-item">mailbox 收件箱 M6</li>
+        <li class="todo-item">context compact 截剪</li>
+      </ul>
+    </div>
+
+    <!-- Prompt 组装 -->
+    <div class="module partial">
+      <div class="module-badge badge-partial">⚠️ 部分</div>
+      <div class="module-name">Prompt 组装</div>
+      <div class="module-file">subagent.py · coordinator.py</div>
+      <ul class="module-items">
+        <li class="done-item">SUBAGENT_SYSTEM 提示</li>
+        <li class="done-item">WORKER_SYSTEM 提示</li>
+        <li class="todo-item">系统提示统一管理</li>
+        <li class="todo-item">记忆注入 memory</li>
+        <li class="todo-item">cache_control 前缀缓存 M9</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- ReAct 循环嵌入 -->
+  <div class="react-box">
+    <div class="react-title">L1 · ReAct 推理循环（嵌在 Harness 内）— loop.py:run_agent_turn()</div>
+    <div class="react-flow">
+      <div class="react-node">① inject notifications<br><span style="font-size:10px;font-weight:400;color:#7aaae0">mailbox → messages</span></div>
+      <div class="react-arrow">→</div>
+      <div class="react-node">② Thought 想<br><span style="font-size:10px;font-weight:400;color:#7aaae0">model.complete()</span></div>
+      <div class="react-arrow">→</div>
+      <div class="react-node">③ Action 行动<br><span style="font-size:10px;font-weight:400;color:#7aaae0">run_tools()</span></div>
+      <div class="react-arrow">→</div>
+      <div class="react-node">④ Observation 观察<br><span style="font-size:10px;font-weight:400;color:#7aaae0">tool_result → messages</span></div>
+    </div>
+    <div class="react-loop-hint">↩ 循环至无工具调用 · max_turns 熔断</div>
+  </div>
+
+</div>
+</div>
+
+<!-- 连接箭头 -->
+<div class="layer-row" style="margin:6px 0">
+  <div style="font-size:20px;color:#aaa;">↓ model.complete(messages, tools) &nbsp;&nbsp;&nbsp; ↑ 返回 Message</div>
+</div>
+
+<!-- L0 下层 -->
+<div class="layer-row">
+  <div class="layer-box l0-box">
+    L0 · 模型 / LLM &nbsp;—&nbsp; providers/bedrock.py (BedrockModel) &nbsp;·&nbsp; model.py (MockModel) &nbsp;·&nbsp; M9 多 provider 切换
+  </div>
+</div>
+
+<!-- 图例 -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot dot-done"></div> 已实现</div>
+  <div class="legend-item"><div class="legend-dot dot-partial"></div> 部分实现</div>
+  <div class="legend-item"><div class="legend-dot dot-todo"></div> 待实现</div>
+</div>
+
+</body>
+</html>

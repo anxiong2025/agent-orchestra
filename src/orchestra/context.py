@@ -23,6 +23,8 @@ import asyncio
 from dataclasses import dataclass, field
 from itertools import count
 
+from orchestra.mailbox import Mailbox
+
 # 进程内自增的 agent 序号 —— 给每个 RunContext 一个稳定可读的身份,便于日志/追踪。
 # (不用随机 UUID:可读性更好,且测试可预期。)
 _agent_seq = count()
@@ -69,6 +71,15 @@ class RunContext:
     # 文件读缓存:可变状态。child() 时【复制一份】给子 Agent,互不污染。
     read_state: ReadFileState = field(default_factory=ReadFileState)
 
+    # ── 通信面:每个 Agent 各自独立 ───────────────────────────────────────
+    # 自己的收件箱：别人往这里 send()，自己 poll()/receive() 来取。
+    # child() 时【新建】—— 每个 Agent 有独立收件箱，互不干扰。
+    mailbox: Mailbox = field(default_factory=Mailbox)
+    # 父级的收件箱引用：子 Agent 跑完后往这里 send() 通知父级。
+    # child() 时【传入父级的 mailbox】—— 这是子→父单向通知的通路。
+    # 主 Agent(depth=0) 没有父级，为 None。
+    leader_mailbox: Mailbox | None = None
+
     # ── 身份 / 深度:每个 Agent 各异 ──────────────────────────────────────
     # 递归深度:主 Agent=0,每派一层子 Agent +1。M5 用它做"套娃守卫"。
     depth: int = 0
@@ -85,8 +96,10 @@ class RunContext:
           · 身份/深度  【新生】—— depth+1、分配新 agent_id、记住 parent_id。
         """
         return RunContext(
-            abort=self.abort,  # 共享:控制信号
-            read_state=self.read_state.copy(),  # 复制:可变状态隔离
-            depth=self.depth + 1,  # 深度 +1
-            parent_id=self.agent_id,  # 记住爹是谁
+            abort=self.abort,                  # 共享:控制信号
+            read_state=self.read_state.copy(), # 复制:可变状态隔离
+            mailbox=Mailbox(),                 # 新建:子 Agent 自己的收件箱
+            leader_mailbox=self.mailbox,       # 传入:父级收件箱，子完成后通知用
+            depth=self.depth + 1,              # 深度 +1
+            parent_id=self.agent_id,           # 记住爹是谁
         )

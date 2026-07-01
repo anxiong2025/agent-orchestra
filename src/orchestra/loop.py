@@ -24,6 +24,17 @@ from orchestra.tool import ToolRegistry
 DEFAULT_MAX_TURNS = 10
 
 
+def inject_pending_notifications(messages: list[Message], ctx: RunContext) -> None:
+    """把 mailbox 里积压的 task-notification 全部取出，逐条包装成 user 消息注入 messages。
+
+    WorkerTool 跑完后往 ctx.mailbox.send() 放通知；
+    每轮 model.complete() 之前调这个函数，模型就能"看见" worker 的结果。
+    poll() 是非阻塞的：没有通知就什么都不做。
+    """
+    while (msg := ctx.mailbox.poll()) is not None:
+        messages.append(Message.user(msg))
+
+
 async def run_agent_turn(
     messages: list[Message],
     model: Model,
@@ -43,6 +54,8 @@ async def run_agent_turn(
     ]
 
     for _turn in range(max_turns):
+        # M6: 每轮推理前，先把 mailbox 里的 worker 通知注入 messages
+        inject_pending_notifications(messages, ctx)
         # 想:把整个历史(+工具清单)发给模型。
         reply = await model.complete(messages, tools=tool_schemas or None)
         messages.append(reply)
@@ -94,7 +107,7 @@ async def run_chat_loop(
     while True:
         try:
             user_input = (await asyncio.to_thread(input, "你 > ")).strip()
-        except KeyboardInterrupt, EOFError:
+        except (KeyboardInterrupt, EOFError):
             break
         if not user_input:
             continue

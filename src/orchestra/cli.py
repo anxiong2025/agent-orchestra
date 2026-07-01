@@ -23,7 +23,7 @@ MILESTONES: list[tuple[str, str, bool]] = [
     ),
     ("M4", "多工具并发:读并发/写独占(orchestration.py)", True),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", True),
-    ("M6", "协调器:Orchestrator-Workers(coordinator.py)", False),
+    ("M6", "协调器:Orchestrator-Workers(coordinator.py)", True),
     ("M7", "Agent 间通信:mailbox + SendMessage(mailbox.py)", False),
     ("M8", "评估-优化循环(examples/)", False),
     ("M9", "多 provider 切换(providers/)", False),
@@ -70,9 +70,40 @@ async def _chat() -> None:
     await run_chat_loop(model, registry)
 
 
+async def _coordinator() -> None:
+    """coordinator 入口：leader 派 worker 并行办活，worker 结果通过 mailbox 回灌。"""
+    from orchestra.coordinator import WorkerTool
+    from orchestra.loop import run_chat_loop
+    from orchestra.providers import make_model
+    from orchestra.tool import ClockTool, ReadFileTool, ToolRegistry
+
+    model = make_model("bedrock")
+
+    # worker 只能用只读工具，不给 write_file（研究任务不需要写文件）
+    def worker_tools() -> ToolRegistry:
+        return ToolRegistry([ReadFileTool(), ClockTool()])
+
+    registry = ToolRegistry([ReadFileTool(), ClockTool()])
+    registry.register(
+        WorkerTool(
+            model,
+            worker_tools,
+            worker_tools=["read_file", "now"],
+            notify=lambda s: print(s),
+        )
+    )
+    print("Agent Orchestra · coordinator(M6 Orchestrator-Workers,派 worker 并行干活)")
+    print("试试：同时研究 src/orchestra/loop.py 和 src/orchestra/tool.py 各自的职责\n")
+    await run_chat_loop(model, registry)
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "chat":
         asyncio.run(_chat())
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "coordinator":
+        asyncio.run(_coordinator())
         return
 
     print("Agent Orchestra —— 多 Agent 编排引擎(学习导向,对标 Claude Code)\n")
@@ -83,9 +114,10 @@ def main() -> None:
         if not done and next_todo is None:
             next_todo = f"{tag} —— {title}"
     print()
-    print(
-        "💬 现在就能体验: uv run orchestra chat  —— 多 Agent(M5,能派子 Agent 并行办活)"
-    )
+    print("💬 现在就能体验:")
+    print("   uv run orchestra chat        —— M5 子 Agent(派分身并行办活)")
+    print("   uv run orchestra coordinator —— M6 协调器(leader 派 worker,结果通过 mailbox 回灌)")
+    print()
     print()
     if next_todo:
         print(f"👉 下一步: {next_todo}")
