@@ -91,10 +91,15 @@ async def run_chat_loop(
     registry: ToolRegistry | None = None,
     *,
     max_turns: int = DEFAULT_MAX_TURNS,
+    ctx: RunContext | None = None,
 ) -> None:
-    """多轮对话外壳:维护累积历史,每轮跑一次 run_agent_turn(ReAct 循环(推理→行动→观察))。"""
+    """多轮对话外壳:维护累积历史,每轮跑一次 run_agent_turn(ReAct 循环(推理→行动→观察))。
+
+    ctx: 默认新建一个。M7 的 `team` demo 会传入一个【共享 directory】的 ctx,
+         这样 REPL 里的这个 Agent 才能被后台 peer 用 send_message 按 agent_id 找到。
+    """
     registry = registry or ToolRegistry()
-    ctx = RunContext()
+    ctx = ctx or RunContext()
     messages: list[Message] = []
 
     def on_event(kind: str, msg: Message) -> None:
@@ -107,7 +112,7 @@ async def run_chat_loop(
     while True:
         try:
             user_input = (await asyncio.to_thread(input, "你 > ")).strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt, EOFError:
             break
         if not user_input:
             continue

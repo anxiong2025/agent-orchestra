@@ -14,8 +14,8 @@ import asyncio
 
 from orchestra.mailbox import Mailbox
 
-
 # ── 1. poll：空队列返回 None ─────────────────────────────────────
+
 
 def test_poll_empty_returns_none():
     """队列为空时 poll() 返回 None，不报错。"""
@@ -24,6 +24,7 @@ def test_poll_empty_returns_none():
 
 
 # ── 2. send → poll：放进去能取出来 ──────────────────────────────
+
 
 def test_send_then_poll():
     """send 一条消息，poll 能取到，取完再 poll 返回 None。"""
@@ -47,6 +48,7 @@ def test_send_multiple_fifo():
 
 # ── 3. receive：队列有消息直接返回 ──────────────────────────────
 
+
 async def test_receive_with_existing_message():
     """队列里已经有消息，receive() 立刻返回，不挂起。"""
     mb = Mailbox()
@@ -56,6 +58,7 @@ async def test_receive_with_existing_message():
 
 
 # ── 4. receive 挂起 → send 唤醒（核心异步行为）──────────────────
+
 
 async def test_receive_waits_then_send_wakes_it():
     """receive() 发现队列空，挂起；之后 send() 把它唤醒。
@@ -88,6 +91,7 @@ async def test_receive_waits_then_send_wakes_it():
 
 
 # ── 5. send 时已有人等：消息不过队列直接交 ──────────────────────
+
 
 async def test_send_bypasses_queue_when_waiter_exists():
     """有人在 receive() 等时，send 直接交消息，_queue 保持为空。"""

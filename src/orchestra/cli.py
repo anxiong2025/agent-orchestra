@@ -24,7 +24,7 @@ MILESTONES: list[tuple[str, str, bool]] = [
     ("M4", "多工具并发:读并发/写独占(orchestration.py)", True),
     ("M5", "子 Agent:递归 + 上下文隔离(subagent.py)", True),
     ("M6", "协调器:Orchestrator-Workers(coordinator.py)", True),
-    ("M7", "Agent 间通信:mailbox + SendMessage(mailbox.py)", False),
+    ("M7", "Agent 间通信:mailbox + SendMessage(mailbox.py)", True),
     ("M8", "评估-优化循环(examples/)", False),
     ("M9", "多 provider 切换(providers/)", False),
     ("M10", "调研工具 + 溯源/防幻觉", False),
@@ -97,6 +97,57 @@ async def _coordinator() -> None:
     await run_chat_loop(model, registry)
 
 
+async def _team() -> None:
+    """team 入口：两个对等 Agent 用 send_message 网状互发消息(M7,对比 M6 的星型)。
+
+    A = 你在 REPL 里操控的那个;B = 后台常驻的 peer,一直挂在 mailbox.receive() 上
+    等消息,收到就跑一轮、决定要不要用 send_message 回发。两者共享同一份 ctx.directory
+    (寻址花名册),所以能互相按 agent_id 找到对方 —— 跟 M6 worker→leader 单向回灌不同,
+    这里谁都能先开口。
+    """
+    from orchestra.context import RunContext
+    from orchestra.loop import run_agent_turn, run_chat_loop
+    from orchestra.message import Message
+    from orchestra.providers import make_model
+    from orchestra.tool import ClockTool, ReadFileTool, SendMessageTool, ToolRegistry
+
+    model = make_model("bedrock")
+
+    ctx_a = RunContext()
+    ctx_b = RunContext(directory=ctx_a.directory)  # 共享花名册,才能互相寻址
+
+    def peer_tools() -> ToolRegistry:
+        return ToolRegistry([ReadFileTool(), ClockTool(), SendMessageTool()])
+
+    peer_system = (
+        f"You are agent #{ctx_b.agent_id}, one peer in a team of equals — there is no "
+        'leader here. Incoming messages are wrapped as <message from="ID">...</message>; '
+        "ID is the sender's numeric agent id. Use your tools to actually complete what's "
+        "asked, then reply with send_message addressed to that same ID. Keep replies concise."
+    )
+
+    async def _run_peer_b() -> None:
+        registry_b = peer_tools()
+        messages_b: list[Message] = [Message.system(peer_system)]
+        while True:
+            incoming = await ctx_b.mailbox.receive()
+            print(f"\n[peer B(#{ctx_b.agent_id}) 收到消息,处理中...]")
+            messages_b.append(Message.user(incoming))
+            await run_agent_turn(messages_b, model, registry_b, ctx_b, max_turns=5)
+            print(f"[peer B(#{ctx_b.agent_id}) 处理完毕,继续监听]\n")
+
+    # 长期存活的后台任务:保留引用,退出 REPL 时显式取消(不留悬空协程)。
+    peer_task = asyncio.create_task(_run_peer_b())
+
+    print("Agent Orchestra · team(M7 网状通信,两个对等 Agent 用 send_message 互相喊话)")
+    print(f"你是 agent #{ctx_a.agent_id};后台常驻 peer 是 agent #{ctx_b.agent_id}。")
+    print(f"试试:用 send_message 给 agent {ctx_b.agent_id} 发条消息,看它回你\n")
+    try:
+        await run_chat_loop(model, peer_tools(), ctx=ctx_a)
+    finally:
+        peer_task.cancel()
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "chat":
         asyncio.run(_chat())
@@ -104,6 +155,10 @@ def main() -> None:
 
     if len(sys.argv) > 1 and sys.argv[1] == "coordinator":
         asyncio.run(_coordinator())
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "team":
+        asyncio.run(_team())
         return
 
     print("Agent Orchestra —— 多 Agent 编排引擎(学习导向,对标 Claude Code)\n")
@@ -116,7 +171,12 @@ def main() -> None:
     print()
     print("💬 现在就能体验:")
     print("   uv run orchestra chat        —— M5 子 Agent(派分身并行办活)")
-    print("   uv run orchestra coordinator —— M6 协调器(leader 派 worker,结果通过 mailbox 回灌)")
+    print(
+        "   uv run orchestra coordinator —— M6 协调器(leader 派 worker,结果通过 mailbox 回灌)"
+    )
+    print(
+        "   uv run orchestra team        —— M7 网状通信(两个对等 Agent 用 send_message 互相喊话)"
+    )
     print()
     print()
     if next_todo:

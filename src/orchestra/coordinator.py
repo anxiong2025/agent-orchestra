@@ -47,10 +47,7 @@ def _format_notification(task: str, conclusion: str) -> str:
     对标 Claude Code §4.5-B 的 task-notification 格式。
     """
     return (
-        "<task-notification>\n"
-        f"Task: {task}\n"
-        f"Result: {conclusion}\n"
-        "</task-notification>"
+        f"<task-notification>\nTask: {task}\nResult: {conclusion}\n</task-notification>"
     )
 
 

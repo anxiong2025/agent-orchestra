@@ -71,7 +71,12 @@ class RunContext:
     # 文件读缓存:可变状态。child() 时【复制一份】给子 Agent,互不污染。
     read_state: ReadFileState = field(default_factory=ReadFileState)
 
-    # ── 通信面:每个 Agent 各自独立 ───────────────────────────────────────
+    # ── 通信面:寻址表【共享】,收件箱【各自独立】───────────────────────────
+    # 花名册:agent_id -> 该 agent 自己的 mailbox。M7 网状通信的寻址依据 ——
+    # 任何 Agent 拿着这份花名册 + 对方的 agent_id,就能查到对方的收件箱直接 send()。
+    # child() 时【共享同一份】(和 abort 一样的道理):所有从同一个根派生出来的 Agent
+    # 都登记在同一张表里,才能互相找到彼此(对标 Claude Code 的 Team 模式寻址)。
+    directory: dict[int, Mailbox] = field(default_factory=dict)
     # 自己的收件箱：别人往这里 send()，自己 poll()/receive() 来取。
     # child() 时【新建】—— 每个 Agent 有独立收件箱，互不干扰。
     mailbox: Mailbox = field(default_factory=Mailbox)
@@ -87,19 +92,25 @@ class RunContext:
     agent_id: int = field(default_factory=lambda: next(_agent_seq))
     parent_id: int | None = None
 
+    def __post_init__(self) -> None:
+        # 一创建就登记自己:花名册里始终能查到"活着的每个 Agent → 它的收件箱"。
+        self.directory[self.agent_id] = self.mailbox
+
     def child(self) -> RunContext:
         """派生子上下文 —— M5 子 Agent 用。
 
-        三件事一次做齐(这就是"完整隔离"):
+        四件事一次做齐(这就是"完整隔离"):
           · abort     【共享】—— 控制面:父级取消能波及子 Agent。
+          · directory 【共享】—— 通信面:子 Agent 也登记进同一张花名册,才能被寻址。
           · read_state【复制】—— 数据面:子 Agent 拿独立的文件视图,不污染父级。
           · 身份/深度  【新生】—— depth+1、分配新 agent_id、记住 parent_id。
         """
         return RunContext(
-            abort=self.abort,                  # 共享:控制信号
-            read_state=self.read_state.copy(), # 复制:可变状态隔离
-            mailbox=Mailbox(),                 # 新建:子 Agent 自己的收件箱
-            leader_mailbox=self.mailbox,       # 传入:父级收件箱，子完成后通知用
-            depth=self.depth + 1,              # 深度 +1
-            parent_id=self.agent_id,           # 记住爹是谁
+            abort=self.abort,  # 共享:控制信号
+            directory=self.directory,  # 共享:同一张寻址花名册
+            read_state=self.read_state.copy(),  # 复制:可变状态隔离
+            mailbox=Mailbox(),  # 新建:子 Agent 自己的收件箱
+            leader_mailbox=self.mailbox,  # 传入:父级收件箱，子完成后通知用
+            depth=self.depth + 1,  # 深度 +1
+            parent_id=self.agent_id,  # 记住爹是谁
         )

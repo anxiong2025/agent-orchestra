@@ -105,6 +105,70 @@ class ClockTool(Tool):
         return datetime.now().isoformat(timespec="seconds")
 
 
+class SendMessageTool(Tool):
+    """给指定 agent_id 发一条消息(网状通信,M7)——对标 tools/SendMessageTool/。
+
+    只读=True:发消息只是往【另一个 Agent 自己的】mailbox 里塞一条,不碰共享可变状态
+    (M4 的读并发/写独占分类里,这和 read_file 是一类:各发各的,互不冲突)。
+
+    寻址靠 ctx.directory(见 context.py)—— 花名册记录"agent_id → 它的 mailbox",
+    每个 RunContext 创建时自动登记自己。对方是否收到,取决于它的循环下一轮
+    是否调了 inject_pending_notifications()(M6 已接好)去 poll() 自己的 mailbox,
+    或是它正在 await mailbox.receive() 挂起等待。
+    """
+
+    name = "send_message"
+    description = (
+        # 直接给另一个 agent(按数字 id)发一条消息;对方在自己下一轮循环里会看到。
+        "Send a message directly to another agent, addressed by its numeric agent id. "
+        "The message lands in that agent's mailbox and it will see it before its next turn.\n"
+        # 用于对等协作(不是上下级派活/回灌那种单向关系)——比如请同事帮查一件事,或回复收到的消息。
+        "Use this for peer-to-peer coordination between agents that are not in a "
+        "leader/worker relationship — e.g. asking a peer to check something, or replying "
+        "to a message you received.\n"
+        # 不该用:回复自己的派发者/调用者——那是通过返回值自动完成的,不用这个工具。
+        "When NOT to use: replying to your own dispatcher/caller — that happens "
+        "automatically via your return value, not this tool.\n"
+        "Parameter `to`: the numeric agent id of the recipient. "
+        "Parameter `message`: the message content, in complete natural language."
+    )
+    is_concurrency_safe = True
+    input_schema = {
+        "type": "object",
+        "properties": {
+            # 收件人的数字 agent id / 要发送的消息内容
+            "to": {
+                "type": "integer",
+                "description": "The recipient agent's numeric id.",
+            },
+            "message": {
+                "type": "string",
+                "description": "The message content to send.",
+            },
+        },
+        "required": ["to", "message"],
+    }
+
+    async def run(self, tool_input: dict[str, Any], ctx: RunContext) -> str:
+        raw_to = tool_input.get("to")
+        try:
+            to = int(raw_to)  # 模型可能把数字 id 传成字符串,兼容一下
+        except TypeError, ValueError:
+            return f"Error: `to` must be a numeric agent id, got {raw_to!r}."
+
+        message = tool_input.get("message", "").strip()
+        if not message:
+            return "Error: message cannot be empty."
+
+        target = ctx.directory.get(to)
+        if target is None:
+            return f"Error: no agent with id {to} (it may not exist, or has already finished)."
+
+        # 包一层 <message from="..."> ,对方模型能知道回复给谁(填进下一次 send_message 的 to)。
+        target.send(f'<message from="{ctx.agent_id}">{message}</message>')
+        return f"Message sent to agent {to}."
+
+
 class WriteFileTool(Tool):
     """写文件(改磁盘 → safe=False,必须独占一批,不能和别人并发)。"""
 
